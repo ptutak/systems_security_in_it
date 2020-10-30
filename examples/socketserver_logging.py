@@ -1,6 +1,5 @@
 import logging
 import socketserver
-import sys
 
 logging.basicConfig(
     level=logging.DEBUG, format="%(name)s: %(message)s",

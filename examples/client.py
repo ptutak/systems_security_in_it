@@ -18,7 +18,8 @@ class Client:
 
     def link_server(self, addr=("localhost", 8080)):
         # Create a socket communication object
-        # By default, the AF_INET protocol family is used, that is, the combination of ipv4 address and port number and tcp protocol.
+        # By default, the AF_INET protocol family is used, that is, the combination of ipv4 address
+        #  and port number and tcp protocol.
         clientSocket = socket.socket()
         # Default connection server address is native ip and port 8080
         clientSocket.connect(addr)
