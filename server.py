@@ -1,9 +1,8 @@
-import hashlib
 import logging
 import pickle
 import socketserver
 import threading
-from typing import Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -71,23 +70,39 @@ class ClientStorage:
         self._client_nicknames: Dict[str, Tuple[str, int]] = {}
         self._connections
 
-    def get_client(
+    def get_response(
         self, client_id: Tuple[str, int], data: bytes
-    ) -> Optional[ClientConnection]:
+    ) -> Tuple[Command, Any, ClientConnection]:
         with self._clients_lock:
             if client_id in self._clients:
-                client = self._clients[client_id]
-                response = client.decrypt(data)
+                client_connection = self._clients[client_id]
+                command, message = client_connection.decrypt(data)
             else:
-                client = self._create_client(client_id, data)
-                response = client.prepare_symmetric_key()
-
-        return (response, client)
+                client_connection = self._create_client(client_id, data)
+                message = client_connection.prepare_symmetric_key()
+                command = Command.CONNECT
+        return (command, message, client_connection)
 
     def _create_client(self, client_id, data) -> ClientConnection:
         new_connection = ClientConnection(data)
         self._clients[client_id] = new_connection
         return new_connection
+
+    def match_client(self, client_address) -> Optional[ClientConnection]:
+        with self._clients_lock:
+            return self._clients.get(client_address)
+
+    def match_client_by_nickname(self, nickname) -> Optional[Tuple[str, int]]:
+        with self._client_nicknames_lock:
+            return self._client_nicknames.get(nickname)
+
+    def register_client_nickname(self, client_id, nickname) -> bool:
+        with self._client_nicknames_lock:
+            if nickname not in self._client_nicknames:
+                self._client_nicknames[nickname] = client_id
+                return True
+            else:
+                return False
 
 
 class EncryptionMessageHandler(socketserver.BaseRequestHandler):
@@ -99,20 +114,57 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         pass
 
     def handle(self):
-        data = self._get_data(self.request)
-        client = self.server.client_storage.get_client(self.client_address, data)
+        heading, data = self._get_data(self.request)
+        command, message, client_connection = self.server.client_storage.get_response(
+            self.client_address, data
+        )
+        self.COMMANDS[command](self, self.client_address, message, client_connection)
 
     @classmethod
-    def _get_data(self, request):
+    def _get_data(cls, request):
         heading = request.recv(HEADING_LENGTH)
-        message_length = int.from_bytes(
+        data_length = int.from_bytes(
             heading, byteorder=HEADING_BYTEORDER.value, signed=HEADING_SIGNED,
         )
-        message = request.recv(message_length)
+        data = request.recv(data_length)
+        return (heading, data)
+
+    @classmethod
+    def _prepare_data(cls, message):
+        data_length = len(message)
+        heading = data_length.to_bytes(
+            HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED
+        )
         return (heading, message)
+
+    def _connect_command(
+        self,
+        client_address: Tuple[str, int],
+        message: bytes,
+        client_connection: ClientConnection,
+    ):
+        heading, message = self._prepare_data(message)
+        self.request.sendall(heading)
+        self.request.sendall(message)
+
+    def _get_user_list_command(self, client_address, message, client_connection):
+        pass
+
+    def _register_nickname_command(self, client_address, message, client_connection):
+        pass
+
+    def _send_message_command(self, client_address, message, client_connection):
+        pass
 
     def finish(self):
         pass
+
+    COMMANDS: Dict[Command, Callable] = {
+        Command.CONNECT: _connect_command,
+        Command.GET_USER_LIST: _get_user_list_command,
+        Command.REGISTER_NICKNAME: _register_nickname_command,
+        Command.SEND_MESSAGE: _send_message_command,
+    }
 
 
 class EncryptionMessageServer(socketserver.ThreadingTCPServer):
