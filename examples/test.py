@@ -18,7 +18,7 @@ encrypted = publicKey.encrypt(
         mgf=padding.MGF1(algorithm=hashes.SHA256()),
         algorithm=hashes.SHA256(),
         label=None,
-    )
+    ),
 )
 
 sendKey = publicKey.public_bytes(
@@ -35,3 +35,15 @@ print(len(sendKeySha256))
 payload = pickle.dumps((sendKey, sendKeySha256))
 print(payload)
 print(len(payload))
+
+symKey = Fernet.generate_key()
+
+cryption = Fernet(symKey)
+
+encrypted = cryption.encrypt(b"encryspt sssme")
+x = (13453433423).to_bytes(length=8, byteorder="big", signed=False)
+y = int.from_bytes(x, byteorder="big", signed=False)
+print(x)
+print(y)
+print(encrypted)
+print(len(encrypted))
