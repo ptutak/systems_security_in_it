@@ -1,7 +1,7 @@
 import socket
 import sys
-from time import sleep
 import threading
+from time import sleep
 
 HOST, PORT = "localhost", 9999
 data = " ".join(sys.argv[1:])

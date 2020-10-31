@@ -10,7 +10,9 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
 
+from common import Command
 from constants import (
+    HASHING_ALGORITHM,
     HEADING_BYTEORDER,
     HEADING_LENGTH,
     HEADING_SIGNED,
@@ -19,23 +21,30 @@ from constants import (
     PUBLIC_KEY_MGF_ALGORITHM,
     PUBLIC_KEY_PADDING,
 )
-from exception import ShasumError
+from exception import InvalidCommand, ShasumError
 
 
 class ClientConnection:
     def __init__(self, public_key_data: bytes):
-        self._lock = threading.Lock()
-        public_key, public_key_sha256 = pickle.loads(public_key_data)
-        if hashlib.sha256(public_key).hexdigest() != public_key_sha256:
-            raise ShasumError("The public key has been tampered")
+        command, public_key_composit = pickle.loads(public_key_data)
+
+        if command != Command.CONNECT:
+            raise InvalidCommand("Expected CONNECT command.")
+
+        public_key, public_key_sha256 = public_key_composit
+
+        if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
+            raise ShasumError("The public key has been tampered.")
+
         self._public_key: _RSAPublicKey = serialization.load_pem_public_key(
             public_key, default_backend()
         )
+
         self._symmetric_key = Fernet.generate_key()
         self._cryption: Fernet = Fernet(self._symmetric_key)
 
     def prepare_symmetric_key(self):
-        self._public_key.encrypt(
+        encrypted_key = self._public_key.encrypt(
             self._symmetric_key,
             PUBLIC_KEY_PADDING(
                 mgf=PUBLIC_KEY_MGF(PUBLIC_KEY_MGF_ALGORITHM()),
@@ -43,26 +52,37 @@ class ClientConnection:
                 label=None,
             ),
         )
+        return pickle.dumps(
+            (encrypted_key, HASHING_ALGORITHM(encrypted_key).hexdigest())
+        )
 
-    def __enter__(self):
-        self._lock.acquire()
+    def decrypt(self, data):
+        return pickle.loads(self._cryption.decrypt(data))
 
-    def __exit__(self):
-        self._lock.release()
+    def encrypt(self, data):
+        return self._cryption.encrypt(data)
 
 
 class ClientStorage:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._clients_lock = threading.Lock()
         self._clients: Dict[Tuple[str, int], ClientConnection] = {}
+        self._client_nicknames_lock = threading.Lock()
+        self._client_nicknames: Dict[str, Tuple[str, int]] = {}
+        self._connections
 
     def get_client(
         self, client_id: Tuple[str, int], data: bytes
     ) -> Optional[ClientConnection]:
-        with self._lock:
+        with self._clients_lock:
             if client_id in self._clients:
-                return self._clients[client_id]
-            return self._create_client(client_id, data)
+                client = self._clients[client_id]
+                response = client.decrypt(data)
+            else:
+                client = self._create_client(client_id, data)
+                response = client.prepare_symmetric_key()
+
+        return (response, client)
 
     def _create_client(self, client_id, data) -> ClientConnection:
         new_connection = ClientConnection(data)
