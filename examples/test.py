@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet
 private_key = rsa.generate_private_key(65537, key_size=2048, backend=default_backend())
 publicKey = private_key.public_key()
 
+print(type(publicKey))
 
 encrypted = publicKey.encrypt(
     b"encrypt me",
@@ -37,8 +38,10 @@ print(payload)
 print(len(payload))
 
 symKey = Fernet.generate_key()
+print(type(symKey))
 
 cryption = Fernet(symKey)
+print(type(cryption))
 
 encrypted = cryption.encrypt(b"encryspt sssme")
 x = (13453433423).to_bytes(length=8, byteorder="big", signed=False)
@@ -48,3 +51,7 @@ print(x)
 print(y)
 print(encrypted)
 print(len(encrypted))
+
+double_encrypted = cryption.encrypt(encrypted)
+print(double_encrypted)
+print(len(double_encrypted))
