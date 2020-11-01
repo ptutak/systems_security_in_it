@@ -3,9 +3,10 @@ from enum import Enum
 
 class Command(Enum):
     CONNECT = "connect"
-    REGISTER_NICKNAME = "register_nickname"
+    REGISTER = "register"
     SEND_MESSAGE = "send_message"
     GET_USER_LIST = "get_user_list"
+    RESET = "reset"
 
 
 class Response(Enum):

@@ -16,16 +16,12 @@ def call():
         sleep(1)
         # Receive data from the server and shut down
         received = str(sock.recv(1024), "utf-8")
-    if received == data.upper():
-        print(".", end="")
+        print(received)
 
+        sock.sendall(bytes(data + "\n", "utf-8"))
+        sleep(1)
+        # Receive data from the server and shut down
+        received = str(sock.recv(1024), "utf-8")
+        print(received)
 
-for i in range(100000):
-    # Create a socket (SOCK_STREAM means a TCP socket)
-    threads.append(threading.Thread(target=call))
-
-for thread in threads:
-    thread.start()
-
-for thread in threads:
-    thread.join()
+call()

@@ -11,12 +11,14 @@ class MyTCPHandler(socketserver.StreamRequestHandler):
     """
 
     def handle(self):
-        # self.request is the TCP socket connected to the client
-        self.data = self.request.recv(1024).strip()
-        print("{} wrote:".format(self.client_address))
-        print(self.data)
-        # just send back the same data, but upper-cased
-        self.request.sendall(self.data.upper())
+        while True:
+            # self.request is the TCP socket connected to the client
+            print(dir(self.request))
+            self.data = self.request.recv(1024).strip()
+            print("{} wrote:".format(self.client_address))
+            print(self.data)
+            # just send back the same data, but upper-cased
+            self.request.sendall(self.data.upper())
 
 
 if __name__ == "__main__":

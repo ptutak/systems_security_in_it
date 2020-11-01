@@ -2,6 +2,7 @@ import logging
 import pickle
 import socketserver
 import threading
+import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from cryptography.fernet import Fernet
@@ -19,12 +20,15 @@ from constants import (
     PUBLIC_KEY_MGF,
     PUBLIC_KEY_MGF_ALGORITHM,
     PUBLIC_KEY_PADDING,
+    ZERO_UUID,
 )
 from exception import InvalidCommand, ShasumError
 
 
 class ClientConnection:
-    def __init__(self, public_key_data: bytes):
+    def __init__(self, client_id: bytes, public_key_data: bytes):
+        self._client_id = client_id
+
         command, public_key_composit = pickle.loads(public_key_data)
 
         if command != Command.CONNECT:
@@ -40,7 +44,12 @@ class ClientConnection:
         )
 
         self._symmetric_key = Fernet.generate_key()
+
         self._cryption: Fernet = Fernet(self._symmetric_key)
+
+    @property
+    def client_id(self):
+        return self._client_id
 
     def prepare_symmetric_key(self):
         encrypted_key = self._public_key.encrypt(
@@ -59,32 +68,37 @@ class ClientConnection:
         return pickle.loads(self._cryption.decrypt(data))
 
     def encrypt(self, data):
-        return self._cryption.encrypt(data)
+        return self._cryption.encrypt(pickle.dumps(data))
 
 
 class ClientStorage:
     def __init__(self):
         self._clients_lock = threading.Lock()
-        self._clients: Dict[Tuple[str, int], ClientConnection] = {}
-        self._client_nicknames_lock = threading.Lock()
-        self._client_nicknames: Dict[str, Tuple[str, int]] = {}
-        self._connections
+        self._clients: Dict[uuid.UUID, ClientConnection] = {}
 
     def get_response(
-        self, client_id: Tuple[str, int], data: bytes
-    ) -> Tuple[Command, Any, ClientConnection]:
+        self, data: bytes
+    ) -> Tuple[Command, bytes, Optional[ClientConnection]]:
+        client_uuid = data[:16]
+        datagram = data[16:]
         with self._clients_lock:
-            if client_id in self._clients:
-                client_connection = self._clients[client_id]
-                command, message = client_connection.decrypt(data)
+            if client_uuid != ZERO_UUID:
+                client_connection = self._clients.get(client_uuid)
+                if client_connection is None:
+                    return (Command.RESET, b"", None)
+                command, message = client_connection.decrypt(datagram)
             else:
-                client_connection = self._create_client(client_id, data)
+                while True:
+                    new_uuid = uuid.uuid4().bytes
+                    if new_uuid not in self._clients:
+                        break
+                client_connection = self._create_client(new_uuid, datagram)
                 message = client_connection.prepare_symmetric_key()
                 command = Command.CONNECT
         return (command, message, client_connection)
 
     def _create_client(self, client_id, data) -> ClientConnection:
-        new_connection = ClientConnection(data)
+        new_connection = ClientConnection(client_id, data)
         self._clients[client_id] = new_connection
         return new_connection
 
@@ -92,17 +106,14 @@ class ClientStorage:
         with self._clients_lock:
             return self._clients.get(client_address)
 
-    def match_client_by_nickname(self, nickname) -> Optional[Tuple[str, int]]:
-        with self._client_nicknames_lock:
-            return self._client_nicknames.get(nickname)
 
-    def register_client_nickname(self, client_id, nickname) -> bool:
-        with self._client_nicknames_lock:
-            if nickname not in self._client_nicknames:
-                self._client_nicknames[nickname] = client_id
-                return True
-            else:
-                return False
+class UserStorage:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._client_nicknames: Dict[str, bytes] = {}
+
+    def get_client_id(self):
+        pass
 
 
 class EncryptionMessageHandler(socketserver.BaseRequestHandler):
@@ -116,7 +127,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     def handle(self):
         heading, data = self._get_data(self.request)
         command, message, client_connection = self.server.client_storage.get_response(
-            self.client_address, data
+            data
         )
         self.COMMANDS[command](self, self.client_address, message, client_connection)
 
@@ -130,12 +141,13 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         return (heading, data)
 
     @classmethod
-    def _prepare_data(cls, message):
-        data_length = len(message)
+    def _prepare_data(cls, message: bytes, client_connection: ClientConnection):
+        data = client_connection.client_id + message
+        data_length = len(data)
         heading = data_length.to_bytes(
             HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED
         )
-        return (heading, message)
+        return (heading, data)
 
     def _connect_command(
         self,
@@ -143,17 +155,20 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         message: bytes,
         client_connection: ClientConnection,
     ):
-        heading, message = self._prepare_data(message)
+        heading, data = self._prepare_data(message, client_connection)
         self.request.sendall(heading)
-        self.request.sendall(message)
+        self.request.sendall(data)
 
     def _get_user_list_command(self, client_address, message, client_connection):
         pass
 
-    def _register_nickname_command(self, client_address, message, client_connection):
+    def _register_command(self, client_address, message, client_connection):
         pass
 
     def _send_message_command(self, client_address, message, client_connection):
+        pass
+
+    def _reset_command(self, client_address, message, client_connection):
         pass
 
     def finish(self):
@@ -162,8 +177,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     COMMANDS: Dict[Command, Callable] = {
         Command.CONNECT: _connect_command,
         Command.GET_USER_LIST: _get_user_list_command,
-        Command.REGISTER_NICKNAME: _register_nickname_command,
+        Command.REGISTER: _register_command,
         Command.SEND_MESSAGE: _send_message_command,
+        Command.RESET: _reset_command,
     }
 
 
@@ -172,3 +188,4 @@ class EncryptionMessageServer(socketserver.ThreadingTCPServer):
         super().__init__(self, server_address, handler_class)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageServer]")
         self.client_storage = ClientStorage()
+        self.user_storage = UserStorage()

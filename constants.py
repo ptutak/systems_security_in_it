@@ -22,3 +22,5 @@ PUBLIC_KEY_MGF_ALGORITHM = hashes.SHA256
 
 
 HASHING_ALGORITHM = hashlib.sha256
+
+ZERO_UUID = bytes(16)

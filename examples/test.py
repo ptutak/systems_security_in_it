@@ -1,5 +1,8 @@
 import hashlib
 import pickle
+from time import time
+
+start = time()
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -53,3 +56,5 @@ print(len(encrypted))
 double_encrypted = cryption.encrypt(encrypted)
 print(double_encrypted)
 print(len(double_encrypted))
+
+print(time() - start)
