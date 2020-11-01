@@ -22,13 +22,13 @@ from constants import (
     PUBLIC_KEY_PADDING,
     ZERO_UUID,
 )
-from exception import InvalidCommand, ShasumError
+from exception import AuthenticationError, InvalidCommand, ShasumError
 
 
 class ClientConnection:
-    def __init__(self, client_id: bytes, public_key_data: bytes):
-        self._client_id = client_id
-
+    def __init__(self, client_uuid: bytes, public_key_data: bytes):
+        self._client_uuid = client_uuid
+        self._client_secret_uuid = uuid.uuid4().bytes
         command, public_key_composit = pickle.loads(public_key_data)
 
         if command != Command.CONNECT:
@@ -48,27 +48,36 @@ class ClientConnection:
         self._cryption: Fernet = Fernet(self._symmetric_key)
 
     @property
-    def client_id(self):
-        return self._client_id
+    def client_uuid(self):
+        return self._client_uuid
+
+    @property
+    def client_secret_uuid(self):
+        return self._client_secret_uuid
 
     def prepare_symmetric_key(self):
-        encrypted_key = self._public_key.encrypt(
-            self._symmetric_key,
+        symmetric_key_hash = HASHING_ALGORITHM(self._symmetric_key).hexdigest()
+        data = pickle.dumps((self._symmetric_key, symmetric_key_hash))
+        heading = self._client_secret_uuid
+        encrypted_data = self._public_key.encrypt(
+            heading + data,
             PUBLIC_KEY_PADDING(
                 mgf=PUBLIC_KEY_MGF(PUBLIC_KEY_MGF_ALGORITHM()),
                 algorithm=PUBLIC_KEY_ALGORITHM(),
                 label=None,
             ),
         )
-        return pickle.dumps(
-            (encrypted_key, HASHING_ALGORITHM(encrypted_key).hexdigest())
-        )
+        return encrypted_data
 
     def decrypt(self, data):
-        return pickle.loads(self._cryption.decrypt(data))
+        decrypted = self._cryption.decrypt(data)
+        client_secret_uuid = decrypted[:16]
+        if client_secret_uuid != self.client_secret_uuid:
+            raise AuthenticationError("Wrong secret key.")
+        return pickle.loads(decrypted[16:])
 
     def encrypt(self, data):
-        return self._cryption.encrypt(pickle.dumps(data))
+        return self._cryption.encrypt(self._client_secret_uuid + pickle.dumps(data))
 
 
 class ClientStorage:
@@ -97,9 +106,9 @@ class ClientStorage:
                 command = Command.CONNECT
         return (command, message, client_connection)
 
-    def _create_client(self, client_id, data) -> ClientConnection:
-        new_connection = ClientConnection(client_id, data)
-        self._clients[client_id] = new_connection
+    def _create_client(self, client_uuid, data) -> ClientConnection:
+        new_connection = ClientConnection(client_uuid, data)
+        self._clients[client_uuid] = new_connection
         return new_connection
 
     def match_client(self, client_address) -> Optional[ClientConnection]:
@@ -142,7 +151,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
 
     @classmethod
     def _prepare_data(cls, message: bytes, client_connection: ClientConnection):
-        data = client_connection.client_id + message
+        data = client_connection.client_uuid + message
         data_length = len(data)
         heading = data_length.to_bytes(
             HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED

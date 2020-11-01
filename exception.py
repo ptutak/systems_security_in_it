@@ -8,3 +8,9 @@ class InvalidCommand(Exception):
     """
         Raised when the command received was unexpected.
     """
+
+
+class AuthenticationError(Exception):
+    """
+        Raised when there was an authentication error.
+    """
