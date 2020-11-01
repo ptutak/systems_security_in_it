@@ -3,7 +3,7 @@ import pickle
 import socketserver
 import threading
 import uuid
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
