@@ -3,7 +3,7 @@ import pickle
 import socketserver
 import threading
 import uuid
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
@@ -159,6 +159,9 @@ class UserStorage:
     def get_client(self, nickname: str) -> Optional[ClientConnection]:
         return self._client_nicknames.get(nickname, None)
 
+    def get_user_list(self) -> List[str]:
+        return list(self._client_nicknames.keys())
+
     def register(self, nickname, client: ClientConnection) -> None:
         with self._lock:
             if self._client_nicknames.get(nickname) is not None:
@@ -206,6 +209,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     ) -> None:
         client_response_address, client_nickname = pickle.loads(message)
         client_connection.client_response_address = client_response_address
+
         try:
             self.server.user_storage.register(client_nickname, client_connection)
         except RegistrationError:
@@ -215,7 +219,6 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
             prepared_response = client_connection.prepare_encrypted_response(
                 encrypted_message
             )
-            self.request.sendall(prepared_response)
         else:
             encrypted_message = client_connection.encrypt(
                 Response.NICKNAME_REGISTRATION_SUCCESS
@@ -224,10 +227,17 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
                 encrypted_message
             )
 
+        self.request.sendall(prepared_response)
+
     def _get_user_list_command(
         self, message: bytes, client_connection: ClientConnection,
     ) -> None:
-        pass
+        user_list = self.server.user_storage.get_user_list()
+        encrypted_message = client_connection.encrypt(user_list)
+        prepared_response = client_connection.prepare_encrypted_response(
+            encrypted_message
+        )
+        self.request.sendall(prepared_response)
 
     def _send_message_command(
         self, message: bytes, client_connection: ClientConnection,
