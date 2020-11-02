@@ -14,3 +14,9 @@ class AuthenticationError(Exception):
     """
         Raised when there was an authentication error.
     """
+
+
+class ResponseAddressError(Exception):
+    """
+        Raised when trying to set up the response address for Client Connection
+    """
