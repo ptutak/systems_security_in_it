@@ -11,6 +11,7 @@ class Command(Enum):
 
 class Response(Enum):
     NICKNAME_ALREADY_USED = "nickname_already_used"
+    NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"
 
 

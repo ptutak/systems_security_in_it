@@ -20,3 +20,9 @@ class ResponseAddressError(Exception):
     """
         Raised when trying to set up the response address for Client Connection
     """
+
+
+class RegistrationError(Exception):
+    """
+        Raised upon registration errors.
+    """
