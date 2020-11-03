@@ -2,12 +2,13 @@ import hashlib
 import pickle
 from time import time
 
-start = time()
-
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+start = time()
+
 
 private_key = rsa.generate_private_key(65537, key_size=2048, backend=default_backend())
 publicKey = private_key.public_key()

@@ -1,6 +1,5 @@
 import socket
 import sys
-import threading
 from time import sleep
 
 HOST, PORT = "localhost", 9999
@@ -23,5 +22,6 @@ def call():
         # Receive data from the server and shut down
         received = str(sock.recv(1024), "utf-8")
         print(received)
+
 
 call()

@@ -38,6 +38,11 @@ class ClientConnection:
         self._client_secret_uuid = uuid.uuid4().bytes
         self._client_communication_address = None
 
+        leading_uuid = public_key_data[0:16]
+
+        if leading_uuid != ZERO_UUID:
+            raise AuthenticationError("No leading ZERO_UUID discovered.")
+
         command, public_key_composit = pickle.loads(public_key_data)
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
@@ -96,13 +101,13 @@ class ClientConnection:
         decrypted = self._cryption.decrypt(data)
         client_secret_uuid = decrypted[:16]
         if client_secret_uuid != self.client_secret_uuid:
-            raise AuthenticationError("Wrong secret key.")
+            raise AuthenticationError("Wrong secret uuid.")
         return pickle.loads(decrypted[16:])
 
     def encrypt(self, data: object) -> bytes:
         return self._cryption.encrypt(self._client_secret_uuid + pickle.dumps(data))
 
-    def prepare_encrypted_response(self, encrypted_message: bytes) -> bytes:
+    def prepare_response(self, encrypted_message: bytes) -> bytes:
         data = self.client_uuid + encrypted_message
         data_length = len(data)
         heading = data_length.to_bytes(
@@ -199,9 +204,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         self, message: bytes, client_connection: ClientConnection,
     ) -> None:
         encrypted_message = client_connection.prepare_encrypted_symmetric_key()
-        encrypted_response = client_connection.prepare_encrypted_response(
-            encrypted_message
-        )
+        encrypted_response = client_connection.prepare_response(encrypted_message)
         self.request.sendall(encrypted_response)
 
     def _register_command(
@@ -216,16 +219,12 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
             encrypted_message = client_connection.encrypt(
                 Response.NICKNAME_ALREADY_USED
             )
-            prepared_response = client_connection.prepare_encrypted_response(
-                encrypted_message
-            )
+            prepared_response = client_connection.prepare_response(encrypted_message)
         else:
             encrypted_message = client_connection.encrypt(
                 Response.NICKNAME_REGISTRATION_SUCCESS
             )
-            prepared_response = client_connection.prepare_encrypted_response(
-                encrypted_message
-            )
+            prepared_response = client_connection.prepare_response(encrypted_message)
 
         self.request.sendall(prepared_response)
 
@@ -234,9 +233,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     ) -> None:
         user_list = self.server.user_storage.get_user_list()
         encrypted_message = client_connection.encrypt(user_list)
-        prepared_response = client_connection.prepare_encrypted_response(
-            encrypted_message
-        )
+        prepared_response = client_connection.prepare_response(encrypted_message)
         self.request.sendall(prepared_response)
 
     def _send_message_command(
@@ -263,7 +260,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
 
 class EncryptionMessageServer(socketserver.ThreadingTCPServer):
     def __init__(self, server_address, handler_class=EncryptionMessageHandler):
-        super().__init__(self, server_address, handler_class)
+        super().__init__(self, server_address, handler_class=handler_class)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageServer]")
         self.client_storage = ClientStorage()
         self.user_storage = UserStorage()

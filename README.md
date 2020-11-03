@@ -9,7 +9,7 @@ Data:
 [Length Heading][Zero UUID, Non Encrypted Payload]
 
 Non Encrypted Payload:
-[Pickled: (CONNECT Command, (Public Key, Public Key Hash))]
+[Zero UUID, Pickled: (CONNECT Command, (Public Key, Public Key Hash))]
 
 
 Connect Response:
