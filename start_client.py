@@ -1,5 +1,4 @@
-from hashlib import new
-from .client import Client
+from .encrypted_comm.client import Client
 
 new_client = Client(("127.0.0.1", 7000))
 

@@ -90,9 +90,7 @@ class ClientConnection:
         encrypted_data = self._public_key.encrypt(
             heading + data,
             KEY_PADDING(
-                mgf=KEY_MGF(KEY_MGF_ALGORITHM()),
-                algorithm=KEY_ALGORITHM(),
-                label=None,
+                mgf=KEY_MGF(KEY_MGF_ALGORITHM()), algorithm=KEY_ALGORITHM(), label=None,
             ),
         )
         return encrypted_data

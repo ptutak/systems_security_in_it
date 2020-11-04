@@ -1,5 +1,4 @@
 import pickle
-from .exception import AuthenticationError
 import socket
 import socketserver
 import threading
@@ -12,14 +11,18 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
 from .common import Command, Response
-
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
     HEADING_LENGTH,
-    HEADING_SIGNED, KEY_ALGORITHM, KEY_MGF, KEY_MGF_ALGORITHM, KEY_PADDING,
+    HEADING_SIGNED,
+    KEY_ALGORITHM,
+    KEY_MGF,
+    KEY_MGF_ALGORITHM,
+    KEY_PADDING,
     ZERO_UUID,
 )
+from .exception import AuthenticationError
 
 
 class ClientConnection:
@@ -114,7 +117,7 @@ class Client:
                 mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
                 algorithm=KEY_ALGORITHM(),
                 label=None,
-            )
+            ),
         )
         symmetric_key, symmetric_key_hash = pickle.loads(decrypted[16:])
         if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
@@ -127,7 +130,8 @@ class Client:
         if self._communication_server is None:
             self.initiate_communication_server()
         data = (
-            Command.REGISTER, pickle.dumps((self._communication_server.server_address, nickname))
+            Command.REGISTER,
+            pickle.dumps((self._communication_server.server_address, nickname)),
         )
         encrypted_data = self._encrypt(data)
         response = self._send_data_and_get_response(encrypted_data)
