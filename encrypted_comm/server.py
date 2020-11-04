@@ -262,7 +262,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
 
 class EncryptionMessageServer(socketserver.ThreadingTCPServer):
     def __init__(self, server_address, handler_class=EncryptionMessageHandler):
-        super().__init__(self, server_address, handler_class=handler_class)
+        super().__init__(self, server_address, handler_class)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageServer]")
         self.client_storage = ClientStorage()
         self.user_storage = UserStorage()

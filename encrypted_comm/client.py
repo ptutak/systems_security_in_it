@@ -1,5 +1,5 @@
 import pickle
-from security_of_it_systems.exception import AuthenticationError
+from .exception import AuthenticationError
 import socket
 import socketserver
 import threading
@@ -124,6 +124,8 @@ class Client:
         self._server_cryption = Fernet(symmetric_key)
 
     def register(self, nickname: str):
+        if self._communication_server is None:
+            self.initiate_communication_server()
         data = (
             Command.REGISTER, pickle.dumps((self._communication_server.server_address, nickname))
         )
