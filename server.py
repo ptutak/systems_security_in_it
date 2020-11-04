@@ -16,10 +16,10 @@ from .constants import (
     HEADING_BYTEORDER,
     HEADING_LENGTH,
     HEADING_SIGNED,
-    PUBLIC_KEY_ALGORITHM,
-    PUBLIC_KEY_MGF,
-    PUBLIC_KEY_MGF_ALGORITHM,
-    PUBLIC_KEY_PADDING,
+    KEY_ALGORITHM,
+    KEY_MGF,
+    KEY_MGF_ALGORITHM,
+    KEY_PADDING,
     ZERO_UUID,
 )
 from .exception import (
@@ -89,9 +89,9 @@ class ClientConnection:
         heading = self._client_secret_uuid
         encrypted_data = self._public_key.encrypt(
             heading + data,
-            PUBLIC_KEY_PADDING(
-                mgf=PUBLIC_KEY_MGF(PUBLIC_KEY_MGF_ALGORITHM()),
-                algorithm=PUBLIC_KEY_ALGORITHM(),
+            KEY_PADDING(
+                mgf=KEY_MGF(KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
                 label=None,
             ),
         )
@@ -211,7 +211,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         self, message: bytes, client_connection: ClientConnection,
     ) -> None:
         client_response_address, client_nickname = pickle.loads(message)
-        client_connection.client_response_address = client_response_address
+        host = self.request.client_address[0]
+        port = client_response_address[1]
+        client_connection.client_response_address = (host, port)
 
         try:
             self.server.user_storage.register(client_nickname, client_connection)

@@ -1,4 +1,5 @@
 import pickle
+from security_of_it_systems.exception import AuthenticationError
 import socket
 import socketserver
 import threading
@@ -10,13 +11,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
-from security_of_it_systems.common import Command
+from .common import Command, Response
 
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
     HEADING_LENGTH,
-    HEADING_SIGNED,
+    HEADING_SIGNED, KEY_ALGORITHM, KEY_MGF, KEY_MGF_ALGORITHM, KEY_PADDING,
     ZERO_UUID,
 )
 
@@ -71,10 +72,10 @@ class ServerConnection:
 
 
 class IdentCryption:
-    def encrypt(self, data):
+    def encrypt(self, data: bytes) -> bytes:
         return data
 
-    def decrypt(self, data):
+    def decrypt(self, data: bytes) -> bytes:
         return data
 
 
@@ -88,7 +89,7 @@ class Client:
         self._communication_server = None
         self._uuid = ZERO_UUID
         self._secret_uuid = ZERO_UUID
-        self._cryption = IdentCryption()
+        self._server_cryption = IdentCryption()
 
     def initiate_communication_server(self):
         self._communication_server = CommunicationServer(
@@ -103,28 +104,63 @@ class Client:
         communication_server_thread.start()
 
     def connect_to_server(self):
-        data = self.prepare_unencrypted_public_key()
-        data_with_secret_uuid = ZERO_UUID + data
-        response = self.send_data_and_get_response(data_with_secret_uuid)
-        # TODO: decrypt the response
+        unencrypted_public_key = self._prepare_unencrypted_public_key()
+        data_with_secret_uuid = self._encrypt(unencrypted_public_key)
+        response = self._send_data_and_get_response(data_with_secret_uuid)
+        self_uuid = response[:16]
+        decrypted = self._server_private_key.decrypt(
+            response[16:],
+            padding=KEY_PADDING(
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
+            )
+        )
+        symmetric_key, symmetric_key_hash = pickle.loads(decrypted[16:])
+        if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
+            raise AuthenticationError("Error while processing keys")
+        self._uuid = self_uuid
+        self._secret_uuid = decrypted[:16]
+        self._server_cryption = Fernet(symmetric_key)
 
-    def prepare_unencrypted_public_key(self) -> bytes:
+    def register(self, nickname: str):
+        data = (
+            Command.REGISTER, pickle.dumps((self._communication_server.server_address, nickname))
+        )
+        encrypted_data = self._encrypt(data)
+        response = self._send_data_and_get_response(encrypted_data)
+        decrypted_response = self._decrypt(response)
+        if decrypted_response == Response.NICKNAME_ALREADY_USED:
+            return False
+        elif decrypted_response == Response.NICKNAME_REGISTRATION_SUCCESS:
+            return True
+        else:
+            raise RuntimeError("Unexpected response")
+
+    def get_user_list(self) -> List[str]:
+        data = (Command.GET_USER_LIST, b"")
+        encrypted_data = self._encrypt(data)
+        response = self._send_data_and_get_response(encrypted_data)
+        user_list = self._decrypt(response)
+        return user_list
+
+    def _prepare_unencrypted_public_key(self) -> Tuple[Command, Tuple[bytes, bytes]]:
         stored_public_key = self._server_public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=PublicFormat.SubjectPublicKeyInfo,
         )
         public_key_hash = HASHING_ALGORITHM(stored_public_key).hexdigest()
         data = (Command.CONNECT, (stored_public_key, public_key_hash))
-        return pickle.dumps(data)
+        return data
 
-    def encrypt(self, message: object) -> bytes:
-        return self._cryption.encrypt(self._secret_uuid + pickle.dumps(message))
+    def _encrypt(self, message: object) -> bytes:
+        return self._server_cryption.encrypt(self._secret_uuid + pickle.dumps(message))
 
-    def decrypt(self, encrypted_message: bytes) -> object:
-        decrypted = self._cryption.decrypt(encrypted_message)
+    def _decrypt(self, encrypted_message: bytes) -> object:
+        decrypted = self._server_cryption.decrypt(encrypted_message)
         return pickle.loads(decrypted)
 
-    def send_data_and_get_response(self, encrypted_data: bytes):
+    def _send_data_and_get_response(self, encrypted_data: bytes):
         data_with_uuid = self._uuid + encrypted_data
         data_length = len(data_with_uuid)
         heading = data_length.to_bytes(
@@ -138,4 +174,4 @@ class Client:
                 recv_heading, byteorder=HEADING_BYTEORDER.value, signed=HEADING_SIGNED,
             )
             data = connection.recv(data_length)
-            return (heading, data)
+            return data
