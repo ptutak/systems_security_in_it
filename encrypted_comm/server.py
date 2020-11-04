@@ -43,7 +43,7 @@ class ClientConnection:
         if leading_uuid != ZERO_UUID:
             raise AuthenticationError("No leading ZERO_UUID discovered.")
 
-        command, public_key_composit = pickle.loads(public_key_data)
+        command, public_key_composit = pickle.loads(public_key_data[16:])
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
 
@@ -90,7 +90,9 @@ class ClientConnection:
         encrypted_data = self._public_key.encrypt(
             heading + data,
             KEY_PADDING(
-                mgf=KEY_MGF(KEY_MGF_ALGORITHM()), algorithm=KEY_ALGORITHM(), label=None,
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
             ),
         )
         return encrypted_data
@@ -174,7 +176,7 @@ class UserStorage:
 
 class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     def __init__(self, request, client_address, server):
-        super().__init__(self, request, client_address, server)
+        super().__init__(request, client_address, server)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageHandler]")
 
     def setup(self):
@@ -193,7 +195,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
     def _extract_data(cls, request):
         heading = request.recv(HEADING_LENGTH)
         data_length = int.from_bytes(
-            heading, byteorder=HEADING_BYTEORDER.value, signed=HEADING_SIGNED,
+            heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
         )
         data = request.recv(data_length)
         return (heading, data)
@@ -209,7 +211,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         self, message: bytes, client_connection: ClientConnection,
     ) -> None:
         client_response_address, client_nickname = pickle.loads(message)
-        host = self.request.client_address[0]
+        host = self.client_address[0]
         port = client_response_address[1]
         client_connection.client_response_address = (host, port)
 
@@ -260,7 +262,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
 
 class EncryptionMessageServer(socketserver.ThreadingTCPServer):
     def __init__(self, server_address, handler_class=EncryptionMessageHandler):
-        super().__init__(self, server_address, handler_class)
+        super().__init__(server_address, handler_class)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageServer]")
         self.client_storage = ClientStorage()
         self.user_storage = UserStorage()

@@ -11,7 +11,7 @@ class ByteOrder(Enum):
 
 
 HEADING_LENGTH = 8
-HEADING_BYTEORDER = ByteOrder.BIG
+HEADING_BYTEORDER = ByteOrder.BIG.value
 HEADING_SIGNED = False
 
 

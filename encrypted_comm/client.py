@@ -64,7 +64,7 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
         destination_server_address,
         handler_class=CommunicationHandler,
     ) -> None:
-        super().__init__(server_address, handler_class=handler_class)
+        super().__init__(server_address, handler_class)
         self.destination_server_address = destination_server_address
         self.client_storage = ClientStorage()
 
@@ -113,7 +113,7 @@ class Client:
         self_uuid = response[:16]
         decrypted = self._server_private_key.decrypt(
             response[16:],
-            padding=KEY_PADDING(
+            KEY_PADDING(
                 mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
                 algorithm=KEY_ALGORITHM(),
                 label=None,
@@ -126,7 +126,7 @@ class Client:
         self._secret_uuid = decrypted[:16]
         self._server_cryption = Fernet(symmetric_key)
 
-    def register(self, nickname: str):
+    def register(self, nickname: str) -> bool:
         if self._communication_server is None:
             self.initiate_communication_server()
         data = (
@@ -135,19 +135,24 @@ class Client:
         )
         encrypted_data = self._encrypt(data)
         response = self._send_data_and_get_response(encrypted_data)
-        decrypted_response = self._decrypt(response)
-        if decrypted_response == Response.NICKNAME_ALREADY_USED:
+        decrypted_message = self._extract_message_from_response(response)
+        if decrypted_message == Response.NICKNAME_ALREADY_USED:
             return False
-        elif decrypted_response == Response.NICKNAME_REGISTRATION_SUCCESS:
+        elif decrypted_message == Response.NICKNAME_REGISTRATION_SUCCESS:
             return True
         else:
             raise RuntimeError("Unexpected response")
+
+    def _extract_message_from_response(self, response: bytes) -> object:
+        if self._uuid != response[:16]:
+            raise AuthenticationError("Bad UUID")
+        return self._decrypt(response[16:])
 
     def get_user_list(self) -> List[str]:
         data = (Command.GET_USER_LIST, b"")
         encrypted_data = self._encrypt(data)
         response = self._send_data_and_get_response(encrypted_data)
-        user_list = self._decrypt(response)
+        user_list = self._extract_message_from_response(response)
         return user_list
 
     def _prepare_unencrypted_public_key(self) -> Tuple[Command, Tuple[bytes, bytes]]:
@@ -164,7 +169,9 @@ class Client:
 
     def _decrypt(self, encrypted_message: bytes) -> object:
         decrypted = self._server_cryption.decrypt(encrypted_message)
-        return pickle.loads(decrypted)
+        if self._secret_uuid != decrypted[:16]:
+            raise AuthenticationError("Bad Secret UUID")
+        return pickle.loads(decrypted[16:])
 
     def _send_data_and_get_response(self, encrypted_data: bytes):
         data_with_uuid = self._uuid + encrypted_data
@@ -177,7 +184,7 @@ class Client:
             connection.sendall(heading + data_with_uuid)
             recv_heading = connection.recv(HEADING_LENGTH)
             data_length = int.from_bytes(
-                recv_heading, byteorder=HEADING_BYTEORDER.value, signed=HEADING_SIGNED,
+                recv_heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
             )
             data = connection.recv(data_length)
             return data
