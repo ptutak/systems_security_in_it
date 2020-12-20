@@ -1,3 +1,4 @@
+from abc import ABC
 from enum import Enum
 
 
@@ -15,8 +16,18 @@ class Response(Enum):
     USER_LIST = "user_list"
 
 
-class Message:
-    def __init__(self, message, receiver):
-        self.receiver = receiver
-        self.message = message
-        self.sender = None
+class Request:
+    def __init__(self, raw_bytes):
+        self._raw_bytes = raw_bytes
+
+
+class Cryption(ABC):
+    def encrypt(self, message: Request) -> bytes:
+        """
+            Encrypts message
+        """
+
+    def decrypt(self, message: bytes) -> Request:
+        """
+            Decrypts message
+        """
