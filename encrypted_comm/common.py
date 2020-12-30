@@ -1,6 +1,20 @@
+import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
+from .exception import AuthenticationError
 from uuid import UUID
+
+from .constants import (
+    HASHING_ALGORITHM,
+    HEADING_BYTEORDER,
+    HEADING_LENGTH,
+    HEADING_SIGNED,
+    KEY_ALGORITHM,
+    KEY_MGF,
+    KEY_MGF_ALGORITHM,
+    KEY_PADDING,
+    ZERO_UUID,
+)
 
 from cryptography.fernet import Fernet
 
@@ -20,8 +34,13 @@ class Response(Enum):
 
 
 class Message:
-    def __init__(self, message: bytes):
+    def __init__(self, message: bytes, data: object):
         self.bytes = message
+        self.data = data
+
+    @classmethod
+    def from_bytes(cls, message: bytes):
+        cls(message, pickle.loads(message))
 
 
 class Request:
@@ -31,73 +50,71 @@ class Request:
 
 
 class Cryption(ABC):
+    def __init__(self, uuid: UUID, secret_uuid: UUID):
+        self._uuid = uuid
+        self._secret_uuid = secret_uuid
+
     @abstractmethod
-    def encrypt(self, message: bytes) -> bytes:
+    def encrypt(self, data: bytes) -> bytes:
         """
             Encrypts message
         """
 
     @abstractmethod
-    def decrypt(self, message: bytes) -> bytes:
+    def decrypt(self, bytes: bytes) -> bytes:
         """
             Decrypts message
         """
 
-    @abstractmethod
-    def prepare_response(self, message: bytes) -> bytes:
-        """
-            Prepares response
-        """
+    def unarchive(self, decrypted_message: bytes) -> object:
+        client_secret_uuid = decrypted_message[:16]
+        if client_secret_uuid != self._secret_uuid.bytes:
+            raise AuthenticationError("Wrong secret key.")
+        return pickle.loads(decrypted_message[16:])
 
-    @abstractmethod
-    def encrypt_and_prepare(self, message: Request) -> bytes:
-        """
-        """
+    def archive(self, data: object) -> bytes:
+        return self._secret_uuid.bytes + pickle.dumps(data)
 
-    @abstractmethod
-    def get_request_and_decrypt(self, request: bytes) -> Request:
-        """
-        """
+    def prepare_response(self, encrypted_message: bytes) -> bytes:
+        data = self._uuid.bytes + encrypted_message
+        data_length = len(data)
+        heading = data_length.to_bytes(
+            HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED
+        )
+        return heading + data
+
+    def get_request(self, encrypted_message: bytes) -> bytes:
+
+
+    def encrypt_and_prepare(self, request: Request) -> bytes:
+        datagram = self.archive((request.command, request.message.data))
+        encrypted_message = self.encrypt(datagram)
+        return self.prepare_response(encrypted_message)
+
+    def get_request_and_decrypt(self, encrypted_message: bytes) -> Request:
+        decrypted_message = self.decrypt(encrypted_message)
+        command, message = self.unarchive(decrypted_message)
+        return Request(command, Message.from_bytes(message))
 
 
 class IdentCryption(Cryption):
-    def __init__(self, uuid: UUID, secret_uuid: UUID):
-        self._uuid = uuid
-        self._secret_uuid = secret_uuid
+    def __init__(self):
+        super().__init__(ZERO_UUID, ZERO_UUID)
 
     def encrypt(self, data: bytes) -> bytes:
         return data
 
     def decrypt(self, data: bytes) -> bytes:
         return data
-
-    def prepare_response(self, message: bytes) -> bytes:
-        return super().prepare_response(message)
-
-    def get_request_and_decrypt(self, request: bytes) -> Request:
-        return super().get_request_and_decrypt(request)
-
-    def encrypt_and_prepare(self, message: Request) -> bytes:
-        return super().encrypt_and_prepare(message)
 
 
 class FernetCryption(Cryption):
     def __init__(self, uuid: UUID, secret_uuid: UUID, sym_key: bytes):
-        self._uuid = uuid
-        self._secret_uuid = secret_uuid
+        super().__init__(uuid, secret_uuid)
         self._cryption = Fernet(sym_key)
 
-    def encrypt(self, data: bytes) -> bytes:
-        pass
-
     def decrypt(self, data: bytes) -> bytes:
-        pass
+        return self._cryption.decrypt(data)
 
-    def prepare_response(self, message: bytes) -> bytes:
-        return super().prepare_response(message)
-
-    def get_request_and_decrypt(self, request: bytes) -> Request:
-        return super().get_request_and_decrypt(request)
-
-    def encrypt_and_prepare(self, message: Request) -> bytes:
-        return super().encrypt_and_prepare(message)
+    def encrypt(self, data: bytes) -> bytes:
+        return self._cryption.encrypt(data)

@@ -40,10 +40,10 @@ from .exception import (
 
 
 class ClientConnection:
-    def __init__(self, client_uuid: bytes, public_key_data: bytes):
+    def __init__(self, client_uuid: uuid.UUID, public_key_data: bytes):
         self._lock = threading.Lock()
         self._client_uuid = client_uuid
-        self._client_secret_uuid = uuid.uuid4().bytes
+        self._client_secret_uuid = uuid.uuid4()
         self._client_communication_address = None
 
         zero_uuid = public_key_data[0:16]
