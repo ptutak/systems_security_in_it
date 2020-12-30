@@ -4,6 +4,7 @@ from uuid import UUID
 
 from cryptography.fernet import Fernet
 
+
 class Command(Enum):
     CONNECT = "connect"
     REGISTER = "register"

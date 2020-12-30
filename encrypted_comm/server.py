@@ -10,7 +10,15 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
 
-from .common import Command, Cryption, Response, Message, Request, FernetCryption, IdentCryption
+from .common import (
+    Command,
+    Cryption,
+    Response,
+    Message,
+    Request,
+    FernetCryption,
+    IdentCryption,
+)
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
@@ -56,7 +64,9 @@ class ClientConnection:
         )
 
         self._symmetric_key = Fernet.generate_key()
-        self._cryption: Cryption = FernetCryption(self._client_uuid, self._client_secret_uuid, self._symmetric_key)
+        self._cryption: Cryption = FernetCryption(
+            self._client_uuid, self._client_secret_uuid, self._symmetric_key
+        )
 
     @property
     def client_uuid(self):

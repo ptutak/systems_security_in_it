@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
-from .common import Command, Response, Request, Message,  Cryption
+from .common import Command, Response, Request, Message, Cryption
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
@@ -154,7 +154,9 @@ class Client:
             format=PublicFormat.SubjectPublicKeyInfo,
         )
         public_key_hash = HASHING_ALGORITHM(stored_public_key).hexdigest()
-        data = Request(Command.CONNECT, Message(pickle.dumps((stored_public_key, public_key_hash))))
+        data = Request(
+            Command.CONNECT, Message(pickle.dumps((stored_public_key, public_key_hash)))
+        )
         data = (Command.CONNECT, pickle.dumps((stored_public_key, public_key_hash)))
         return data
 
