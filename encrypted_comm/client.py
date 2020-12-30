@@ -74,14 +74,6 @@ class ServerConnection:
         pass
 
 
-class IdentCryption(Cryption):
-    def encrypt(self, data: bytes) -> bytes:
-        return data
-
-    def decrypt(self, data: bytes) -> bytes:
-        return data
-
-
 class Client:
     def __init__(self, server_address: Tuple[str, int]) -> int:
         self._server_address = server_address
@@ -156,13 +148,14 @@ class Client:
         user_list = self._extract_message_from_response(response)
         return user_list
 
-    def _prepare_unencrypted_public_key(self) -> Tuple[Command, Tuple[bytes, bytes]]:
+    def _prepare_unencrypted_public_key(self) -> Request:
         stored_public_key = self._server_public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=PublicFormat.SubjectPublicKeyInfo,
         )
         public_key_hash = HASHING_ALGORITHM(stored_public_key).hexdigest()
-        data = (Command.CONNECT, (stored_public_key, public_key_hash))
+        data = Request(Command.CONNECT, Message(pickle.dumps((stored_public_key, public_key_hash))))
+        data = (Command.CONNECT, pickle.dumps((stored_public_key, public_key_hash)))
         return data
 
     def _encrypt(self, message: object) -> bytes:

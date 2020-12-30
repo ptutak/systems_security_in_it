@@ -10,7 +10,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
 
-from .common import Command, Response, Message, Request
+from .common import Command, Cryption, Response, Message, Request, FernetCryption, IdentCryption
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
@@ -38,16 +38,16 @@ class ClientConnection:
         self._client_secret_uuid = uuid.uuid4().bytes
         self._client_communication_address = None
 
-        leading_uuid = public_key_data[0:16]
+        zero_uuid = public_key_data[0:16]
 
-        if leading_uuid != ZERO_UUID:
+        if zero_uuid != ZERO_UUID:
             raise AuthenticationError("No leading ZERO_UUID discovered.")
 
         command, public_key_composit = pickle.loads(public_key_data[16:])
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
 
-        public_key, public_key_sha256 = public_key_composit
+        public_key, public_key_sha256 = pickle.loads(public_key_composit)
         if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
             raise ShasumError("The public key has been tampered.")
 
@@ -56,7 +56,7 @@ class ClientConnection:
         )
 
         self._symmetric_key = Fernet.generate_key()
-        self._cryption: Fernet = Fernet(self._symmetric_key)
+        self._cryption: Cryption = FernetCryption(self._client_uuid, self._client_secret_uuid, self._symmetric_key)
 
     @property
     def client_uuid(self):
