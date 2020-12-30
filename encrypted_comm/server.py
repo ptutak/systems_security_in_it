@@ -18,6 +18,7 @@ from .common import (
     Request,
     FernetCryption,
     IdentCryption,
+    RSAEncryption,
 )
 from .constants import (
     HASHING_ALGORITHM,
@@ -42,10 +43,14 @@ from .exception import (
 class ClientConnection:
     def __init__(self, client_uuid: uuid.UUID, public_key_data: bytes):
         self._lock = threading.Lock()
-        self._client_uuid = client_uuid
-        self._client_secret_uuid = uuid.uuid4()
-        self._client_communication_address = None
+        self._uuid = client_uuid
+        self._secret_uuid = uuid.uuid4()
+        self._symmetric_key: bytes = Fernet.generate_key()
+        self._cryption: Cryption = FernetCryption(
+            self._uuid, self._secret_uuid, self._symmetric_key
+        )
 
+        self._client_communication_address = None
         zero_uuid = public_key_data[0:16]
 
         if zero_uuid != ZERO_UUID:
@@ -63,18 +68,13 @@ class ClientConnection:
             public_key, default_backend()
         )
 
-        self._symmetric_key = Fernet.generate_key()
-        self._cryption: Cryption = FernetCryption(
-            self._client_uuid, self._client_secret_uuid, self._symmetric_key
-        )
-
     @property
     def client_uuid(self):
-        return self._client_uuid
+        return self._uuid
 
     @property
     def client_secret_uuid(self):
-        return self._client_secret_uuid
+        return self._secret_uuid
 
     @property
     def communication_address(self):

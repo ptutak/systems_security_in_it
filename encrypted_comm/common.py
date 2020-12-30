@@ -1,6 +1,8 @@
 import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
+
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKeyWithSerialization, RSAPublicKey
 from .exception import AuthenticationError
 from uuid import UUID
 
@@ -16,7 +18,11 @@ from .constants import (
     ZERO_UUID,
 )
 
+
 from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
+from cryptography.hazmat.primitives import serialization
 
 
 class Command(Enum):
@@ -61,7 +67,7 @@ class Cryption(ABC):
         """
 
     @abstractmethod
-    def decrypt(self, bytes: bytes) -> bytes:
+    def decrypt(self, data: bytes) -> bytes:
         """
             Decrypts message
         """
@@ -90,8 +96,9 @@ class Cryption(ABC):
         return encrypted_message[16:]
 
     def encrypt_and_prepare(self, request: Request) -> bytes:
-        datagram = self.archive((request.command, request.message.data))
-        encrypted_message = self.encrypt(datagram)
+        message_datagram = (request.command, request.message.bytes)
+        archived_datagram = self.archive(message_datagram)
+        encrypted_message = self.encrypt(archived_datagram)
         return self.prepare_response(encrypted_message)
 
     def get_request_and_decrypt(self, encrypted_request: bytes) -> Request:
@@ -122,3 +129,41 @@ class FernetCryption(Cryption):
 
     def encrypt(self, data: bytes) -> bytes:
         return self._cryption.encrypt(data)
+
+
+class RSAEncryption(Cryption):
+    def __init__(self, uuid: UUID, secret_uuid: UUID, public_key: bytes):
+        super().__init__(uuid, secret_uuid)
+        self._public_key: RSAPublicKey = public_key
+
+    def encrypt(self, data: bytes) -> bytes:
+        return self._public_key.encrypt(
+            data,
+            KEY_PADDING(
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
+            ),
+        )
+
+    def decrypt(self, data: bytes) -> bytes:
+        return NotImplemented
+
+
+class RSADecryption(Cryption):
+    def __init__(self, uuid: UUID, secret_uuid: UUID, private_key: bytes):
+        super().__init__(uuid, secret_uuid)
+        self._private_key: RSAPrivateKeyWithSerialization = private_key
+
+    def encrypt(self, data: bytes) -> bytes:
+        return NotImplemented
+
+    def decrypt(self, data: bytes) -> bytes:
+        return self._private_key.decrypt(
+            data,
+            KEY_PADDING(
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
+            ),
+        )
