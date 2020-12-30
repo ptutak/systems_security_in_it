@@ -84,14 +84,18 @@ class Cryption(ABC):
         return heading + data
 
     def get_request(self, encrypted_message: bytes) -> bytes:
-
+        uuid = encrypted_message[0:16]
+        if uuid != self._uuid.bytes:
+            raise AuthenticationError("Wrong uuid.")
+        return encrypted_message[16:]
 
     def encrypt_and_prepare(self, request: Request) -> bytes:
         datagram = self.archive((request.command, request.message.data))
         encrypted_message = self.encrypt(datagram)
         return self.prepare_response(encrypted_message)
 
-    def get_request_and_decrypt(self, encrypted_message: bytes) -> Request:
+    def get_request_and_decrypt(self, encrypted_request: bytes) -> Request:
+        encrypted_message = self.get_request(encrypted_request)
         decrypted_message = self.decrypt(encrypted_message)
         command, message = self.unarchive(decrypted_message)
         return Request(command, Message.from_bytes(message))
