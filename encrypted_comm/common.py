@@ -1,6 +1,6 @@
 from abc import ABC
 from enum import Enum
-
+from uuid import UUID
 
 class Command(Enum):
     CONNECT = "connect"
@@ -16,18 +16,24 @@ class Response(Enum):
     USER_LIST = "user_list"
 
 
+class Message:
+    def __init__(self, message: bytes):
+        self.bytes = message
+
+
 class Request:
-    def __init__(self, raw_bytes):
-        self._raw_bytes = raw_bytes
+    def __init__(self, command: Command, message: Message):
+        self.command = command
+        self.message = message
 
 
 class Cryption(ABC):
-    def encrypt(self, message: Request) -> bytes:
+    def encrypt(self, message: bytes) -> bytes:
         """
             Encrypts message
         """
 
-    def decrypt(self, message: bytes) -> Request:
+    def decrypt(self, message: bytes) -> bytes:
         """
             Decrypts message
         """

@@ -10,7 +10,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
 
-from .common import Command, Response
+from .common import Command, Response, Message, Request
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
@@ -116,6 +116,12 @@ class ClientConnection:
         return heading + data
 
 
+class ClientRequest:
+    def __init__(self, request: Request, connection: ClientConnection):
+        self.request = request
+        self.connection = connection
+
+
 class ClientStorage:
     def __init__(self):
         self._clients_lock = threading.Lock()
@@ -135,7 +141,7 @@ class ClientStorage:
         if client_uuid != ZERO_UUID:
             client_connection = self._clients.get(client_uuid)
             if client_connection is None:
-                return (Command.RESET, b"", None)
+                return ClientRequest(Request(Command.RESET, Message(bytes(0))), None)
             command, message = client_connection.decrypt(datagram)
         else:
             while True:
@@ -145,7 +151,7 @@ class ClientStorage:
             client_connection = self._create_client(new_uuid, datagram)
             message = bytes(0)
             command = Command.CONNECT
-        return (command, message, client_connection)
+        return ClientRequest(Request(command, Message(message)), client_connection)
 
     def _create_client(self, client_uuid, data) -> ClientConnection:
         new_connection = ClientConnection(client_uuid, data)
@@ -184,12 +190,12 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         heading, data = self._extract_data(self.request)
-        (
-            command,
-            message,
-            client_connection,
-        ) = self.server.client_storage.get_message_data(data)
-        self.COMMANDS[command](self, message, client_connection)
+        client_request: ClientRequest = self.server.client_storage.get_message_data(
+            data
+        )
+        self.COMMANDS[client_request.request.command](
+            self, client_request.request.message.bytes, client_request.connection
+        )
 
     @classmethod
     def _extract_data(cls, request):

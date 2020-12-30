@@ -21,10 +21,25 @@ Server-Encryption Response Message:
 
 
 Regular communication:
-Data:
+
+Client to Server Data:
 [Length Heading][User UUID, Server-Encryption Payload]
 
 Server-Encryption Payload:
-[User Secret UUID, Pickled: (Command, Client-Encryption Data / Server-Communication Data)]
+[User Secret UUID, Pickled: (Command, Client-Communication Data / Server-Communication Data)]
+
+Client-Communication Data:
+[Destination Nickname, Client-Encrypted Data]
+
+
+Server to Client Data:
+[Length Heading][User UUID, Client-Encryption Payload]
+
+Client-Encryption Payload
+[User Secret UUID, Pickled: (Command.MESSAGE, Client-Communication Data)]
+
+Client-Communication Data:
+[Source Nickname, Client-Encrypted Data]
+
 
 ```

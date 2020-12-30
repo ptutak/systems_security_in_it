@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
-from .common import Command, Response
+from .common import Command, Response, Request, Message,  Cryption
 from .constants import (
     HASHING_ALGORITHM,
     HEADING_BYTEORDER,
@@ -74,7 +74,7 @@ class ServerConnection:
         pass
 
 
-class IdentCryption:
+class IdentCryption(Cryption):
     def encrypt(self, data: bytes) -> bytes:
         return data
 
@@ -90,9 +90,10 @@ class Client:
         )
         self._server_public_key = self._server_private_key.public_key()
         self._communication_server = None
+        self._communication_server_thread = None
         self._uuid = ZERO_UUID
         self._secret_uuid = ZERO_UUID
-        self._server_cryption = IdentCryption()
+        self._server_cryption: Cryption = IdentCryption()
 
     def initiate_communication_server(self):
         self._communication_server = CommunicationServer(
@@ -100,11 +101,11 @@ class Client:
             handler_class=CommunicationHandler,
             destination_server_address=self._server_address,
         )
-        communication_server_thread = threading.Thread(
+        self._communication_server_thread = threading.Thread(
             target=self._communication_server.serve_forever
         )
-        communication_server_thread.daemon = True
-        communication_server_thread.start()
+        self._communication_server_thread.daemon = True
+        self._communication_server_thread.start()
 
     def connect_to_server(self):
         unencrypted_public_key = self._prepare_unencrypted_public_key()
