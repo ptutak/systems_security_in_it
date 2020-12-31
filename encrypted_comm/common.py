@@ -2,16 +2,16 @@ import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Union
+from uuid import UUID
 
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric.rsa import (
     RSAPrivateKeyWithSerialization,
     RSAPublicKey,
 )
-from .exception import AuthenticationError
-from uuid import UUID
 
 from .constants import (
-    HEADING_BYTEORDER,
+    HASHING_ALGORITHM, HEADING_BYTEORDER,
     HEADING_LENGTH,
     HEADING_SIGNED,
     KEY_ALGORITHM,
@@ -20,9 +20,7 @@ from .constants import (
     KEY_PADDING,
     ZERO_UUID,
 )
-
-
-from cryptography.fernet import Fernet
+from .exception import AuthenticationError
 
 
 class Command(Enum):
@@ -108,12 +106,12 @@ class Cryption(ABC):
 
     def get_request_bytes(self, encrypted_message: bytes) -> bytes:
         uuid = encrypted_message[0:16]
-        if uuid != self._uuid.bytes:
+        if uuid != self.uuid.bytes:
             raise AuthenticationError("Wrong uuid.")
         return encrypted_message[16:]
 
     def archive(self, data: object) -> bytes:
-        return self._secret_uuid.bytes + pickle.dumps(data)
+        return self.secret_uuid.bytes + pickle.dumps(data)
 
     def prepare_response(self, encrypted_message: bytes) -> bytes:
         data = self._uuid.bytes + encrypted_message
@@ -198,10 +196,10 @@ class RSADecryption(Cryption):
 
     def unarchive(self, decrypted_message: bytes) -> object:
         client_secret_uuid = decrypted_message[:16]
-        self._secret_uuid = client_secret_uuid
+        self._secret_uuid = UUID(bytes=client_secret_uuid)
         return pickle.loads(decrypted_message[16:])
 
     def get_request_bytes(self, encrypted_message: bytes) -> bytes:
         uuid = encrypted_message[0:16]
-        self._uuid = uuid
+        self._uuid = UUID(bytes=uuid)
         return encrypted_message[16:]

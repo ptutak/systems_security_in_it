@@ -2,9 +2,8 @@ import hashlib
 import pickle
 import socket
 
-from cryptography.fernet import Fernet
-
 import rsa
+from cryptography.fernet import Fernet
 from errorclass import AuthenticationError
 
 

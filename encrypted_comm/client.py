@@ -1,4 +1,3 @@
-import pickle
 import socket
 import socketserver
 import threading
@@ -11,16 +10,16 @@ from cryptography.hazmat.primitives.serialization import PublicFormat
 
 from .common import (
     Command,
+    Cryption,
     FernetCryption,
     IdentCryption,
-    RSADecryption,
+    Message,
+    Request,
     RequestReceiver,
     Response,
-    Request,
-    Message,
-    Cryption,
+    RSADecryption,
 )
-from .constants import HASHING_ALGORITHM
+from .constants import HASHING_ALGORITHM, KEY_SIZE
 from .exception import AuthenticationError
 
 
@@ -79,7 +78,7 @@ class Client(RequestReceiver):
     def __init__(self, server_address: Tuple[str, int]) -> int:
         self._server_address = server_address
         self._server_private_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=2048, backend=default_backend()
+            public_exponent=65537, key_size=KEY_SIZE, backend=default_backend()
         )
         self._private_key_decryption: RSADecryption = RSADecryption(
             self._server_private_key

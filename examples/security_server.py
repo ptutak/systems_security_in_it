@@ -2,11 +2,10 @@ import hashlib
 import pickle
 import socket
 import time
-from exceptions import AuthenticationError
-
-from cryptography.fernet import Fernet
 
 import rsa
+from cryptography.fernet import Fernet
+from exceptions import AuthenticationError
 
 
 class Server:

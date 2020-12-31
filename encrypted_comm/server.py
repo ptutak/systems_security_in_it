@@ -1,5 +1,4 @@
 import logging
-import pickle
 import socketserver
 import threading
 import uuid
@@ -13,16 +12,15 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from .common import (
     Command,
     Cryption,
-    RequestReceiver,
-    Response,
-    Message,
-    Request,
     FernetCryption,
     IdentCryption,
+    Message,
+    Request,
+    RequestReceiver,
+    Response,
     RSAEncryption,
 )
 from .constants import HASHING_ALGORITHM
-
 from .exception import (
     InvalidCommand,
     RegistrationError,
@@ -34,11 +32,13 @@ from .exception import (
 class ClientConnection:
     ZERO_CRYPTION = IdentCryption()
 
-    def __init__(self, uuid: uuid.UUID, register_request: bytes):
+    def __init__(self, client_uuid: uuid.UUID, register_request: bytes):
         self._lock = threading.Lock()
         secret_uuid = uuid.uuid4()
-        symmetric_key: bytes = Fernet.generate_key()
-        self._cryption: Cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
+        self._symmetric_key: bytes = Fernet.generate_key()
+        self._cryption: Cryption = FernetCryption(
+            client_uuid, secret_uuid, self._symmetric_key
+        )
 
         self._client_communication_address = None
         request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
@@ -54,7 +54,7 @@ class ClientConnection:
             public_key, default_backend()
         )
 
-        self._public_key_cryption = RSAEncryption(uuid, secret_uuid, public_key)
+        self._public_key_cryption = RSAEncryption(client_uuid, secret_uuid, public_key)
 
     @property
     def communication_address(self):
@@ -97,7 +97,7 @@ class ClientStorage:
         self._clients_lock = threading.Lock()
         self._clients: Dict[bytes, ClientConnection] = {}
 
-    def get_request(self, message: bytes) -> ClientRequest:
+    def get_client_request(self, message: bytes) -> ClientRequest:
         with self._clients_lock:
             connection = self.match_client(message)
             if connection is None:
@@ -152,7 +152,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
             data
         )
         if client_request.request.command_or_response in self.COMMANDS:
-            self.COMMANDS[client_request.request.command](self, client_request)
+            self.COMMANDS[client_request.request.command_or_response](
+                self, client_request
+            )
 
     def _connect_command(self, client_request: ClientRequest,) -> None:
         encrypted_request = client_request.connection.prepare_encrypted_symmetric_key()
