@@ -16,7 +16,7 @@ Connect Response:
 [Length Heading][User UUID, Server-Encryption Response Message]
 
 Server-Encryption Response Message:
-[User Secret UUID, Pickled: (Symmetric Key, SymmetricKeyHash)]
+[User Secret UUID, Pickled: (Response.CONNECTION_SUCCESS, Pickled: (Symmetric Key, SymmetricKeyHash))]
 
 
 
@@ -29,7 +29,7 @@ Server-Encryption Payload:
 [User Secret UUID, Pickled: (Command, Client-Communication Data / Server-Communication Data)]
 
 Client-Communication Data:
-[Destination Nickname, Client-Encrypted Data]
+Pickled: (Destination Nickname, Client-Encrypted Data)
 
 
 Server to Client Data:
@@ -39,7 +39,7 @@ Client-Encryption Payload
 [User Secret UUID, Pickled: (Command.MESSAGE, Client-Communication Data)]
 
 Client-Communication Data:
-[Source Nickname, Client-Encrypted Data]
+Pickled: (Source Nickname, Client-Encrypted Data)
 
 
 ```

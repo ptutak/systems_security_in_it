@@ -1,6 +1,7 @@
 import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
+from typing import Union
 
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKeyWithSerialization, RSAPublicKey
 from .exception import AuthenticationError
@@ -34,6 +35,7 @@ class Command(Enum):
 
 
 class Response(Enum):
+    CONNECTION_SUCCESS = "connection_success"
     NICKNAME_ALREADY_USED = "nickname_already_used"
     NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"
@@ -48,10 +50,16 @@ class Message:
     def from_bytes(cls, message: bytes):
         cls(message, pickle.loads(message))
 
+    @classmethod
+    def from_data(cls, data: object):
+        cls(pickle.dumps(data), data)
+
 
 class Request:
-    def __init__(self, command: Command, message: Message):
-        self.command = command
+    def __init__(
+        self, command_or_response: Union[Command, Response], message: Message
+    ):
+        self.command_or_response = command_or_response
         self.message = message
 
 
@@ -89,23 +97,23 @@ class Cryption(ABC):
         )
         return heading + data
 
-    def get_request(self, encrypted_message: bytes) -> bytes:
+    def get_response(self, encrypted_message: bytes) -> bytes:
         uuid = encrypted_message[0:16]
         if uuid != self._uuid.bytes:
             raise AuthenticationError("Wrong uuid.")
         return encrypted_message[16:]
 
-    def encrypt_and_prepare(self, request: Request) -> bytes:
-        message_datagram = (request.command, request.message.bytes)
+    def prepare_request_and_encrypt(self, request: Request) -> bytes:
+        message_datagram = (request.command_or_response, request.message.bytes)
         archived_datagram = self.archive(message_datagram)
         encrypted_message = self.encrypt(archived_datagram)
         return self.prepare_response(encrypted_message)
 
-    def get_request_and_decrypt(self, encrypted_request: bytes) -> Request:
-        encrypted_message = self.get_request(encrypted_request)
+    def decrypt_and_get_request(self, encrypted_request: bytes) -> Request:
+        encrypted_message = self.get_response(encrypted_request)
         decrypted_message = self.decrypt(encrypted_message)
-        command, message = self.unarchive(decrypted_message)
-        return Request(command, Message.from_bytes(message))
+        command_or_response, message = self.unarchive(decrypted_message)
+        return Request(command_or_response, Message.from_bytes(message))
 
 
 class IdentCryption(Cryption):

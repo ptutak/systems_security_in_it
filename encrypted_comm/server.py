@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from .common import (
     Command,
@@ -41,39 +42,41 @@ from .exception import (
 
 
 class ClientConnection:
-    def __init__(self, client_uuid: uuid.UUID, public_key_data: bytes):
+    ZERO_CRYPTION = IdentCryption()
+
+    def __init__(self, client_uuid: uuid.UUID, register_request: bytes):
         self._lock = threading.Lock()
         self._uuid = client_uuid
         self._secret_uuid = uuid.uuid4()
         self._symmetric_key: bytes = Fernet.generate_key()
         self._cryption: Cryption = FernetCryption(
-            self._uuid, self._secret_uuid, self._symmetric_key
+            self.uuid, self.secret_uuid, self._symmetric_key
         )
 
         self._client_communication_address = None
-        zero_uuid = public_key_data[0:16]
-
-        if zero_uuid != ZERO_UUID:
-            raise AuthenticationError("No leading ZERO_UUID discovered.")
-
-        command, public_key_composit = pickle.loads(public_key_data[16:])
+        request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
+        command, public_key_composit = request.command, request.message.data
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
 
-        public_key, public_key_sha256 = pickle.loads(public_key_composit)
+        public_key, public_key_sha256 = public_key_composit
         if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
             raise ShasumError("The public key has been tampered.")
 
-        self._public_key: _RSAPublicKey = serialization.load_pem_public_key(
+        self._public_key: RSAPublicKey = serialization.load_pem_public_key(
             public_key, default_backend()
         )
 
+        self._public_key_cryption = RSAEncryption(
+            self.uuid, self.secret_uuid, self._public_key
+        )
+
     @property
-    def client_uuid(self):
+    def uuid(self):
         return self._uuid
 
     @property
-    def client_secret_uuid(self):
+    def secret_uuid(self):
         return self._secret_uuid
 
     @property
@@ -95,35 +98,15 @@ class ClientConnection:
 
     def prepare_encrypted_symmetric_key(self) -> bytes:
         symmetric_key_hash = HASHING_ALGORITHM(self._symmetric_key).hexdigest()
-        data = pickle.dumps((self._symmetric_key, symmetric_key_hash))
-        heading = self._client_secret_uuid
-        encrypted_data = self._public_key.encrypt(
-            heading + data,
-            KEY_PADDING(
-                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
-                algorithm=KEY_ALGORITHM(),
-                label=None,
-            ),
-        )
-        return encrypted_data
+        data = (self._symmetric_key, symmetric_key_hash)
+        request = Request(Response.CONNECTION_SUCCESS, Message.from_data(data))
+        return self._public_key_cryption.prepare_request_and_encrypt(request)
 
-    def decrypt(self, data: bytes) -> object:
-        decrypted = self._cryption.decrypt(data)
-        client_secret_uuid = decrypted[:16]
-        if client_secret_uuid != self.client_secret_uuid:
-            raise AuthenticationError("Wrong secret uuid.")
-        return pickle.loads(decrypted[16:])
+    def decrypt(self, encrypted_request: bytes) -> Request:
+        return self._cryption.decrypt_and_get_request(encrypted_request)
 
-    def encrypt(self, data: object) -> bytes:
-        return self._cryption.encrypt(self._client_secret_uuid + pickle.dumps(data))
-
-    def prepare_response(self, encrypted_message: bytes) -> bytes:
-        data = self.client_uuid + encrypted_message
-        data_length = len(data)
-        heading = data_length.to_bytes(
-            HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED
-        )
-        return heading + data
+    def encrypt(self, request: Request) -> bytes:
+        return self._cryption.prepare_request_and_encrypt(request)
 
 
 class ClientRequest:
@@ -137,11 +120,9 @@ class ClientStorage:
         self._clients_lock = threading.Lock()
         self._clients: Dict[bytes, ClientConnection] = {}
 
-    def get_message_data(
+    def get_request(
         self, data: bytes
     ) -> Tuple[Command, bytes, Optional[ClientConnection]]:
-        client_uuid = data[:16]
-        datagram = data[16:]
         with self._clients_lock:
             return self._extract_response(client_uuid, datagram)
 
@@ -168,8 +149,8 @@ class ClientStorage:
         self._clients[client_uuid] = new_connection
         return new_connection
 
-    def match_client(self, client_uuid: bytes) -> Optional[ClientConnection]:
-        return self._clients.get(client_uuid)
+    def match_client(self, message: bytes) -> Optional[ClientConnection]:
+        return self._clients.get(message[0:16])
 
 
 class UserStorage:
