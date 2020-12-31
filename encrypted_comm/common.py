@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import (
 )
 
 from .constants import (
-    HASHING_ALGORITHM, HEADING_BYTEORDER,
+    HEADING_BYTEORDER,
     HEADING_LENGTH,
     HEADING_SIGNED,
     KEY_ALGORITHM,
