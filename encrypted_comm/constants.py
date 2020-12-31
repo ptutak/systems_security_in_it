@@ -1,4 +1,5 @@
 import hashlib
+import uuid
 from enum import Enum
 
 from cryptography.hazmat.primitives import hashes
@@ -23,4 +24,4 @@ KEY_MGF_ALGORITHM = hashes.SHA256
 
 HASHING_ALGORITHM = hashlib.sha256
 
-ZERO_UUID = bytes(16)
+ZERO_UUID = uuid.UUID(bytes=bytes(16))

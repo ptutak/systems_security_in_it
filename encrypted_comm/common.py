@@ -11,7 +11,6 @@ from .exception import AuthenticationError
 from uuid import UUID
 
 from .constants import (
-    HASHING_ALGORITHM,
     HEADING_BYTEORDER,
     HEADING_LENGTH,
     HEADING_SIGNED,
@@ -24,9 +23,6 @@ from .constants import (
 
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
-from cryptography.hazmat.primitives import serialization
 
 
 class Command(Enum):
@@ -70,7 +66,7 @@ class Request:
 
 class RequestReceiver:
     @classmethod
-    def extract_data(cls, request):
+    def receive_data(cls, request):
         heading = request.recv(HEADING_LENGTH)
         data_length = int.from_bytes(
             heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
@@ -83,6 +79,14 @@ class Cryption(ABC):
     def __init__(self, uuid: UUID, secret_uuid: UUID):
         self._uuid = uuid
         self._secret_uuid = secret_uuid
+
+    @property
+    def uuid(self):
+        return self._uuid
+
+    @property
+    def secret_uuid(self):
+        return self._secret_uuid
 
     @abstractmethod
     def encrypt(self, data: bytes) -> bytes:
@@ -102,6 +106,12 @@ class Cryption(ABC):
             raise AuthenticationError("Wrong secret key.")
         return pickle.loads(decrypted_message[16:])
 
+    def get_request_bytes(self, encrypted_message: bytes) -> bytes:
+        uuid = encrypted_message[0:16]
+        if uuid != self._uuid.bytes:
+            raise AuthenticationError("Wrong uuid.")
+        return encrypted_message[16:]
+
     def archive(self, data: object) -> bytes:
         return self._secret_uuid.bytes + pickle.dumps(data)
 
@@ -113,12 +123,6 @@ class Cryption(ABC):
         )
         return heading + data
 
-    def get_response(self, encrypted_message: bytes) -> bytes:
-        uuid = encrypted_message[0:16]
-        if uuid != self._uuid.bytes:
-            raise AuthenticationError("Wrong uuid.")
-        return encrypted_message[16:]
-
     def prepare_request_and_encrypt(self, request: Request) -> bytes:
         message_datagram = (request.command_or_response, request.message.bytes)
         archived_datagram = self.archive(message_datagram)
@@ -126,7 +130,7 @@ class Cryption(ABC):
         return self.prepare_response(encrypted_message)
 
     def decrypt_and_get_request(self, encrypted_request: bytes) -> Request:
-        encrypted_message = self.get_response(encrypted_request)
+        encrypted_message = self.get_request_bytes(encrypted_request)
         decrypted_message = self.decrypt(encrypted_message)
         command_or_response, message = self.unarchive(decrypted_message)
         return Request(command_or_response, Message.from_bytes(message))
@@ -175,8 +179,8 @@ class RSAEncryption(Cryption):
 
 
 class RSADecryption(Cryption):
-    def __init__(self, uuid: UUID, secret_uuid: UUID, private_key: bytes):
-        super().__init__(uuid, secret_uuid)
+    def __init__(self, private_key: bytes):
+        super().__init__(ZERO_UUID, ZERO_UUID)
         self._private_key: RSAPrivateKeyWithSerialization = private_key
 
     def encrypt(self, data: bytes) -> bytes:
@@ -191,3 +195,13 @@ class RSADecryption(Cryption):
                 label=None,
             ),
         )
+
+    def unarchive(self, decrypted_message: bytes) -> object:
+        client_secret_uuid = decrypted_message[:16]
+        self._secret_uuid = client_secret_uuid
+        return pickle.loads(decrypted_message[16:])
+
+    def get_request_bytes(self, encrypted_message: bytes) -> bytes:
+        uuid = encrypted_message[0:16]
+        self._uuid = uuid
+        return encrypted_message[16:]

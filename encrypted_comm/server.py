@@ -7,7 +7,6 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.backends.openssl.rsa import _RSAPublicKey
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
@@ -25,7 +24,6 @@ from .common import (
 from .constants import HASHING_ALGORITHM
 
 from .exception import (
-    AuthenticationError,
     InvalidCommand,
     RegistrationError,
     ResponseAddressError,
@@ -36,14 +34,11 @@ from .exception import (
 class ClientConnection:
     ZERO_CRYPTION = IdentCryption()
 
-    def __init__(self, client_uuid: uuid.UUID, register_request: bytes):
+    def __init__(self, uuid: uuid.UUID, register_request: bytes):
         self._lock = threading.Lock()
-        self._uuid = client_uuid
-        self._secret_uuid = uuid.uuid4()
-        self._symmetric_key: bytes = Fernet.generate_key()
-        self._cryption: Cryption = FernetCryption(
-            self.uuid, self.secret_uuid, self._symmetric_key
-        )
+        secret_uuid = uuid.uuid4()
+        symmetric_key: bytes = Fernet.generate_key()
+        self._cryption: Cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
 
         self._client_communication_address = None
         request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
@@ -55,21 +50,11 @@ class ClientConnection:
         if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
             raise ShasumError("The public key has been tampered.")
 
-        self._public_key: RSAPublicKey = serialization.load_pem_public_key(
+        public_key: RSAPublicKey = serialization.load_pem_public_key(
             public_key, default_backend()
         )
 
-        self._public_key_cryption = RSAEncryption(
-            self.uuid, self.secret_uuid, self._public_key
-        )
-
-    @property
-    def uuid(self):
-        return self._uuid
-
-    @property
-    def secret_uuid(self):
-        return self._secret_uuid
+        self._public_key_cryption = RSAEncryption(uuid, secret_uuid, public_key)
 
     @property
     def communication_address(self):
@@ -162,7 +147,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
         pass
 
     def handle(self):
-        heading, data = self.extract_data(self.request)
+        heading, data = self.receive_data(self.request)
         client_request: ClientRequest = self.server.client_storage.get_client_request(
             data
         )
@@ -201,14 +186,10 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
         )
         self.request.sendall(encrypted_message)
 
-    def _send_message_command(
-        self, message: bytes, client_connection: ClientConnection,
-    ) -> None:
+    def _send_message_command(self, client_request: ClientRequest) -> None:
         pass
 
-    def _reset_command(
-        self, message: bytes, client_connection: ClientConnection,
-    ) -> None:
+    def _reset_command(self, client_request: ClientRequest) -> None:
         pass
 
     def finish(self):

@@ -4,24 +4,23 @@ import socketserver
 import threading
 from typing import List, Tuple
 
-from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
-from .common import Command, Response, Request, Message, Cryption
-from .constants import (
-    HASHING_ALGORITHM,
-    HEADING_BYTEORDER,
-    HEADING_LENGTH,
-    HEADING_SIGNED,
-    KEY_ALGORITHM,
-    KEY_MGF,
-    KEY_MGF_ALGORITHM,
-    KEY_PADDING,
-    ZERO_UUID,
+from .common import (
+    Command,
+    FernetCryption,
+    IdentCryption,
+    RSADecryption,
+    RequestReceiver,
+    Response,
+    Request,
+    Message,
+    Cryption,
 )
+from .constants import HASHING_ALGORITHM
 from .exception import AuthenticationError
 
 
@@ -74,17 +73,19 @@ class ServerConnection:
         pass
 
 
-class Client:
+class Client(RequestReceiver):
+    ZERO_CRYPTION = IdentCryption()
+
     def __init__(self, server_address: Tuple[str, int]) -> int:
         self._server_address = server_address
         self._server_private_key = rsa.generate_private_key(
             public_exponent=65537, key_size=2048, backend=default_backend()
         )
-        self._server_public_key = self._server_private_key.public_key()
+        self._private_key_decryption: RSADecryption = RSADecryption(
+            self._server_private_key
+        )
         self._communication_server = None
         self._communication_server_thread = None
-        self._uuid = ZERO_UUID
-        self._secret_uuid = ZERO_UUID
         self._server_cryption: Cryption = IdentCryption()
 
     def initiate_communication_server(self):
@@ -100,87 +101,70 @@ class Client:
         self._communication_server_thread.start()
 
     def connect_to_server(self):
-        unencrypted_public_key = self._prepare_unencrypted_public_key()
-        data_with_secret_uuid = self._encrypt(unencrypted_public_key)
-        response = self._send_data_and_get_response(data_with_secret_uuid)
-        self_uuid = response[:16]
-        decrypted = self._server_private_key.decrypt(
-            response[16:],
-            KEY_PADDING(
-                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
-                algorithm=KEY_ALGORITHM(),
-                label=None,
-            ),
+        unencrypted_public_key = self._prepare_unencrypted_public_key_request()
+        data_with_secret_uuid = self.ZERO_CRYPTION.prepare_request_and_encrypt(
+            unencrypted_public_key
         )
-        symmetric_key, symmetric_key_hash = pickle.loads(decrypted[16:])
+        encrypted_request = self._send_data_and_get_response(data_with_secret_uuid)
+        request = self._private_key_decryption.decrypt_and_get_request(
+            encrypted_request
+        )
+        if request.command_or_response != Response.CONNECTION_SUCCESS:
+            raise RuntimeError("Connection failed")
+        uuid = self._private_key_decryption.uuid
+        secret_uuid = self._private_key_decryption.secret_uuid
+        symmetric_key, symmetric_key_hash = request.message.data
         if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
             raise AuthenticationError("Error while processing keys")
-        self._uuid = self_uuid
-        self._secret_uuid = decrypted[:16]
-        self._server_cryption = Fernet(symmetric_key)
+        self._server_cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
 
     def register(self, nickname: str) -> bool:
         if self._communication_server is None:
             self.initiate_communication_server()
-        data = (
+        data = Request(
             Command.REGISTER,
-            pickle.dumps((self._communication_server.server_address, nickname)),
+            Message.from_data((self._communication_server.server_address, nickname)),
         )
         encrypted_data = self._encrypt(data)
         response = self._send_data_and_get_response(encrypted_data)
-        decrypted_message = self._extract_message_from_response(response)
-        if decrypted_message == Response.NICKNAME_ALREADY_USED:
+        request = self._decrypt(response)
+        if request.command_or_response == Response.NICKNAME_ALREADY_USED:
             return False
-        elif decrypted_message == Response.NICKNAME_REGISTRATION_SUCCESS:
+        elif request.command_or_response == Response.NICKNAME_REGISTRATION_SUCCESS:
             return True
         else:
             raise RuntimeError("Unexpected response")
 
-    def _extract_message_from_response(self, response: bytes) -> object:
-        if self._uuid != response[:16]:
-            raise AuthenticationError("Bad UUID")
-        return self._decrypt(response[16:])
-
     def get_user_list(self) -> List[str]:
-        data = (Command.GET_USER_LIST, b"")
-        encrypted_data = self._encrypt(data)
+        request = Request(Command.GET_USER_LIST, Message.zero_message())
+        encrypted_data = self._encrypt(request)
         response = self._send_data_and_get_response(encrypted_data)
-        user_list = self._extract_message_from_response(response)
-        return user_list
+        request = self._decrypt(response)
+        if request.command_or_response != Response.USER_LIST:
+            raise RuntimeError("Unexpected response")
+        return request.message.data
 
-    def _prepare_unencrypted_public_key(self) -> Request:
-        stored_public_key = self._server_public_key.public_bytes(
+    def _prepare_unencrypted_public_key_request(self) -> Request:
+        server_public_key = self._server_private_key.public_key()
+        stored_public_key = server_public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=PublicFormat.SubjectPublicKeyInfo,
         )
         public_key_hash = HASHING_ALGORITHM(stored_public_key).hexdigest()
-        data = Request(
-            Command.CONNECT, Message(pickle.dumps((stored_public_key, public_key_hash)))
+        request = Request(
+            Command.CONNECT, Message.from_data((stored_public_key, public_key_hash))
         )
-        data = (Command.CONNECT, pickle.dumps((stored_public_key, public_key_hash)))
-        return data
+        return request
 
-    def _encrypt(self, message: object) -> bytes:
-        return self._server_cryption.encrypt(self._secret_uuid + pickle.dumps(message))
+    def _encrypt(self, request: Request) -> bytes:
+        return self._server_cryption.prepare_request_and_encrypt(request)
 
-    def _decrypt(self, encrypted_message: bytes) -> object:
-        decrypted = self._server_cryption.decrypt(encrypted_message)
-        if self._secret_uuid != decrypted[:16]:
-            raise AuthenticationError("Bad Secret UUID")
-        return pickle.loads(decrypted[16:])
+    def _decrypt(self, encrypted_request: bytes) -> Request:
+        return self._server_cryption.decrypt_and_get_request(encrypted_request)
 
     def _send_data_and_get_response(self, encrypted_data: bytes):
-        data_with_uuid = self._uuid + encrypted_data
-        data_length = len(data_with_uuid)
-        heading = data_length.to_bytes(
-            length=HEADING_LENGTH, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED
-        )
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
             connection.connect(self._server_address)
-            connection.sendall(heading + data_with_uuid)
-            recv_heading = connection.recv(HEADING_LENGTH)
-            data_length = int.from_bytes(
-                recv_heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
-            )
-            data = connection.recv(data_length)
+            connection.sendall(encrypted_data)
+            heading, data = self.receive_data(connection)
             return data
