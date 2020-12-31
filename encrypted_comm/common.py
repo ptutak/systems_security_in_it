@@ -3,7 +3,10 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Union
 
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKeyWithSerialization, RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.rsa import (
+    RSAPrivateKeyWithSerialization,
+    RSAPublicKey,
+)
 from .exception import AuthenticationError
 from uuid import UUID
 
@@ -48,19 +51,32 @@ class Message:
 
     @classmethod
     def from_bytes(cls, message: bytes):
-        cls(message, pickle.loads(message))
+        return cls(message, pickle.loads(message))
 
     @classmethod
     def from_data(cls, data: object):
-        cls(pickle.dumps(data), data)
+        return cls(pickle.dumps(data), data)
+
+    @classmethod
+    def zero_message(cls):
+        return cls.from_data(tuple())
 
 
 class Request:
-    def __init__(
-        self, command_or_response: Union[Command, Response], message: Message
-    ):
+    def __init__(self, command_or_response: Union[Command, Response], message: Message):
         self.command_or_response = command_or_response
         self.message = message
+
+
+class RequestReceiver:
+    @classmethod
+    def extract_data(cls, request):
+        heading = request.recv(HEADING_LENGTH)
+        data_length = int.from_bytes(
+            heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
+        )
+        data = request.recv(data_length)
+        return (heading, data)
 
 
 class Cryption(ABC):

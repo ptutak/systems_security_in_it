@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from .common import (
     Command,
     Cryption,
+    RequestReceiver,
     Response,
     Message,
     Request,
@@ -21,17 +22,8 @@ from .common import (
     IdentCryption,
     RSAEncryption,
 )
-from .constants import (
-    HASHING_ALGORITHM,
-    HEADING_BYTEORDER,
-    HEADING_LENGTH,
-    HEADING_SIGNED,
-    KEY_ALGORITHM,
-    KEY_MGF,
-    KEY_MGF_ALGORITHM,
-    KEY_PADDING,
-    ZERO_UUID,
-)
+from .constants import HASHING_ALGORITHM
+
 from .exception import (
     AuthenticationError,
     InvalidCommand,
@@ -55,7 +47,7 @@ class ClientConnection:
 
         self._client_communication_address = None
         request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
-        command, public_key_composit = request.command, request.message.data
+        command, public_key_composit = request.command_or_response, request.message.data
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
 
@@ -120,33 +112,23 @@ class ClientStorage:
         self._clients_lock = threading.Lock()
         self._clients: Dict[bytes, ClientConnection] = {}
 
-    def get_request(
-        self, data: bytes
-    ) -> Tuple[Command, bytes, Optional[ClientConnection]]:
+    def get_request(self, message: bytes) -> ClientRequest:
         with self._clients_lock:
-            return self._extract_response(client_uuid, datagram)
+            connection = self.match_client(message)
+            if connection is None:
+                new_connection = self._create_client(message)
+                return ClientRequest(
+                    Request(Command.CONNECT, Message.zero_message()), new_connection,
+                )
+            return ClientRequest(connection.decrypt(message), connection)
 
-    def _extract_response(
-        self, client_uuid: bytes, datagram: bytes
-    ) -> Tuple[Command, bytes, ClientConnection]:
-        if client_uuid != ZERO_UUID:
-            client_connection = self._clients.get(client_uuid)
-            if client_connection is None:
-                return ClientRequest(Request(Command.RESET, Message(bytes(0))), None)
-            command, message = client_connection.decrypt(datagram)
-        else:
-            while True:
-                new_uuid = uuid.uuid4().bytes
-                if new_uuid not in self._clients:
-                    break
-            client_connection = self._create_client(new_uuid, datagram)
-            message = bytes(0)
-            command = Command.CONNECT
-        return ClientRequest(Request(command, Message(message)), client_connection)
-
-    def _create_client(self, client_uuid, data) -> ClientConnection:
-        new_connection = ClientConnection(client_uuid, data)
-        self._clients[client_uuid] = new_connection
+    def _create_client(self, message: bytes) -> ClientConnection:
+        while True:
+            new_uuid = uuid.uuid4()
+            if new_uuid.bytes not in self._clients:
+                break
+        new_connection = ClientConnection(new_uuid, message)
+        self._clients[new_uuid.bytes] = new_connection
         return new_connection
 
     def match_client(self, message: bytes) -> Optional[ClientConnection]:
@@ -171,7 +153,7 @@ class UserStorage:
             self._client_nicknames[nickname] = client
 
 
-class EncryptionMessageHandler(socketserver.BaseRequestHandler):
+class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver):
     def __init__(self, request, client_address, server):
         super().__init__(request, client_address, server)
         self.logger = logging.getLogger(f"{__name__}[EncryptionMessageHandler]")
@@ -180,60 +162,44 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler):
         pass
 
     def handle(self):
-        heading, data = self._extract_data(self.request)
-        client_request: ClientRequest = self.server.client_storage.get_message_data(
+        heading, data = self.extract_data(self.request)
+        client_request: ClientRequest = self.server.client_storage.get_client_request(
             data
         )
-        self.COMMANDS[client_request.request.command](
-            self, client_request.request.message.bytes, client_request.connection
-        )
+        if client_request.request.command_or_response in self.COMMANDS:
+            self.COMMANDS[client_request.request.command](self, client_request)
 
-    @classmethod
-    def _extract_data(cls, request):
-        heading = request.recv(HEADING_LENGTH)
-        data_length = int.from_bytes(
-            heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
-        )
-        data = request.recv(data_length)
-        return (heading, data)
+    def _connect_command(self, client_request: ClientRequest,) -> None:
+        encrypted_request = client_request.connection.prepare_encrypted_symmetric_key()
+        self.request.sendall(encrypted_request)
 
-    def _connect_command(
-        self, message: bytes, client_connection: ClientConnection,
-    ) -> None:
-        encrypted_message = client_connection.prepare_encrypted_symmetric_key()
-        encrypted_response = client_connection.prepare_response(encrypted_message)
-        self.request.sendall(encrypted_response)
-
-    def _register_command(
-        self, message: bytes, client_connection: ClientConnection,
-    ) -> None:
-        client_response_address, client_nickname = pickle.loads(message)
+    def _register_command(self, client_request: ClientRequest,) -> None:
+        client_response_address, client_nickname = client_request.request.message.data
         host = self.client_address[0]
         port = client_response_address[1]
-        client_connection.client_response_address = (host, port)
+        client_request.connection.client_response_address = (host, port)
 
         try:
-            self.server.user_storage.register(client_nickname, client_connection)
+            self.server.user_storage.register(
+                client_nickname, client_request.connection
+            )
         except RegistrationError:
-            encrypted_message = client_connection.encrypt(
-                Response.NICKNAME_ALREADY_USED
+            encrypted_message = client_request.connection.encrypt(
+                Request(Response.NICKNAME_ALREADY_USED, Message.zero_message())
             )
-            prepared_response = client_connection.prepare_response(encrypted_message)
         else:
-            encrypted_message = client_connection.encrypt(
-                Response.NICKNAME_REGISTRATION_SUCCESS
+            encrypted_message = client_request.connection.encrypt(
+                Request(Response.NICKNAME_REGISTRATION_SUCCESS, Message.zero_message())
             )
-            prepared_response = client_connection.prepare_response(encrypted_message)
 
-        self.request.sendall(prepared_response)
+        self.request.sendall(encrypted_message)
 
-    def _get_user_list_command(
-        self, message: bytes, client_connection: ClientConnection,
-    ) -> None:
+    def _get_user_list_command(self, client_request: ClientRequest,) -> None:
         user_list = self.server.user_storage.get_user_list()
-        encrypted_message = client_connection.encrypt(user_list)
-        prepared_response = client_connection.prepare_response(encrypted_message)
-        self.request.sendall(prepared_response)
+        encrypted_message = client_request.connection.encrypt(
+            Request(Response.USER_LIST, Message.from_data(user_list))
+        )
+        self.request.sendall(encrypted_message)
 
     def _send_message_command(
         self, message: bytes, client_connection: ClientConnection,
