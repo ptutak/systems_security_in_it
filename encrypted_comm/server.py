@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from .common import (
-    Command,
+    AsymmetricEncryption, Command,
     Cryption,
     FernetCryption,
     IdentCryption,
@@ -50,11 +50,9 @@ class ClientConnection:
         if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
             raise ShasumError("The public key has been tampered.")
 
-        public_key: RSAPublicKey = serialization.load_pem_public_key(
-            public_key, default_backend()
-        )
+        encryption = RSAEncryption.from_serialized_key(public_key)
 
-        self._public_key_cryption = RSAEncryption(client_uuid, secret_uuid, public_key)
+        self._public_key_cryption: AsymmetricEncryption = AsymmetricEncryption(client_uuid, secret_uuid, encryption)
 
     @property
     def communication_address(self):
@@ -201,7 +199,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
         Command.CONNECT: _connect_command,
         Command.GET_USER_LIST: _get_user_list_command,
         Command.REGISTER: _register_command,
-        Command.SEND_MESSAGE: _send_message_command,
+        Command.MESSAGE: _send_message_command,
         Command.RESET: _reset_command,
     }
 

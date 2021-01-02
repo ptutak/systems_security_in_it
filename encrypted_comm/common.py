@@ -1,8 +1,13 @@
 import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 from uuid import UUID
+
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import PublicFormat
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric.rsa import (
@@ -18,6 +23,7 @@ from .constants import (
     KEY_MGF,
     KEY_MGF_ALGORITHM,
     KEY_PADDING,
+    KEY_SIZE,
     ZERO_UUID,
 )
 from .exception import AuthenticationError
@@ -26,7 +32,8 @@ from .exception import AuthenticationError
 class Command(Enum):
     CONNECT = "connect"
     REGISTER = "register"
-    SEND_MESSAGE = "send_message"
+    MESSAGE = "message"
+    CONNECT_TO_USER = "connect_to_user"
     GET_USER_LIST = "get_user_list"
     RESET = "reset"
 
@@ -40,20 +47,37 @@ class Response(Enum):
 
 class Message:
     def __init__(self, message: bytes, data: object):
-        self.bytes = message
-        self.data = data
+        self._bytes = message
+        self._data = data
+
+    @property
+    def bytes(self):
+        return self._bytes
+
+    @property
+    def data(self):
+        return self._data
 
     @classmethod
     def from_bytes(cls, message: bytes):
-        return cls(message, pickle.loads(message))
+        return Message(message, pickle.loads(message))
 
     @classmethod
     def from_data(cls, data: object):
-        return cls(pickle.dumps(data), data)
+        return Message(pickle.dumps(data), data)
 
     @classmethod
     def zero_message(cls):
         return cls.from_data(tuple())
+
+
+class ChatMessage(Message):
+    def __init__(self, sender: Optional[str], receiver: str, message: str):
+        (sender, receiver, message)
+        super().__init__()
+        self.sender = sender
+        self.receiver = receiver
+        self.message = message
 
 
 class Request:
@@ -71,6 +95,58 @@ class RequestReceiver:
         )
         data = request.recv(data_length)
         return (data_length, data)
+
+
+class RSAEncryption:
+    def __init__(self, public_key: rsa.RSAPublicKey):
+        self._public_key = public_key
+
+    @property
+    def public_key_serialized(self) -> bytes:
+        return self._public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=PublicFormat.SubjectPublicKeyInfo,
+        )
+
+    @classmethod
+    def from_serialized_key(cls, public_key_serialized) -> "RSAEncryption":
+        public_key: RSAPublicKey = serialization.load_pem_public_key(
+            public_key_serialized, default_backend()
+        )
+        return RSAEncryption(public_key)
+
+    def encrypt(self, data: bytes) -> bytes:
+        return self._public_key.encrypt(
+            data,
+            KEY_PADDING(
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
+            ),
+        )
+
+
+class RSADecryption:
+    def __init__(self, private_key: rsa.RSAPrivateKeyWithSerialization):
+        self._private_key = private_key
+
+    def decrypt(self, data: bytes) -> bytes:
+        return self._private_key.decrypt(
+            data,
+            KEY_PADDING(
+                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
+                algorithm=KEY_ALGORITHM(),
+                label=None,
+            ),
+        )
+
+
+class RSACryption(RSAEncryption, RSADecryption):
+    def __init__(self):
+        self._private_key: rsa.RSAPrivateKeyWithSerialization = rsa.generate_private_key(
+            public_exponent=65537, key_size=KEY_SIZE, backend=default_backend()
+        )
+        self._public_key: rsa.RSAPublicKey = self._private_key.public_key()
 
 
 class Cryption(ABC):
@@ -157,42 +233,28 @@ class FernetCryption(Cryption):
         return self._cryption.encrypt(data)
 
 
-class RSAEncryption(Cryption):
-    def __init__(self, uuid: UUID, secret_uuid: UUID, public_key: bytes):
+class AsymmetricEncryption(Cryption):
+    def __init__(self, uuid: UUID, secret_uuid: UUID, encryption: RSAEncryption):
         super().__init__(uuid, secret_uuid)
-        self._public_key: RSAPublicKey = public_key
+        self._encryption = encryption
 
     def encrypt(self, data: bytes) -> bytes:
-        return self._public_key.encrypt(
-            data,
-            KEY_PADDING(
-                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
-                algorithm=KEY_ALGORITHM(),
-                label=None,
-            ),
-        )
+        return self._encryption.encrypt(data)
 
     def decrypt(self, data: bytes) -> bytes:
         return NotImplemented
 
 
-class RSADecryption(Cryption):
-    def __init__(self, private_key: bytes):
+class AsymmetricDecryption(Cryption):
+    def __init__(self, decryption: RSADecryption):
         super().__init__(ZERO_UUID, ZERO_UUID)
-        self._private_key: RSAPrivateKeyWithSerialization = private_key
+        self._decryption = decryption
+
+    def decrypt(self, data: bytes) -> bytes:
+        return self._decryption.decrypt(data)
 
     def encrypt(self, data: bytes) -> bytes:
         return NotImplemented
-
-    def decrypt(self, data: bytes) -> bytes:
-        return self._private_key.decrypt(
-            data,
-            KEY_PADDING(
-                mgf=KEY_MGF(algorithm=KEY_MGF_ALGORITHM()),
-                algorithm=KEY_ALGORITHM(),
-                label=None,
-            ),
-        )
 
     def unarchive(self, decrypted_message: bytes) -> object:
         client_secret_uuid = decrypted_message[:16]

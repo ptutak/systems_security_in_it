@@ -9,17 +9,17 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
 from .common import (
-    Command,
+    AsymmetricDecryption, Command,
     Cryption,
     FernetCryption,
     IdentCryption,
-    Message,
+    Message, RSACryption,
     Request,
     RequestReceiver,
     Response,
     RSADecryption,
 )
-from .constants import HASHING_ALGORITHM, KEY_SIZE
+from .constants import HASHING_ALGORITHM, KEY_ALGORITHM, KEY_MGF, KEY_MGF_ALGORITHM, KEY_PADDING, KEY_SIZE
 from .exception import AuthenticationError
 
 
@@ -77,11 +77,9 @@ class Client(RequestReceiver):
 
     def __init__(self, server_address: Tuple[str, int]) -> int:
         self._server_address = server_address
-        self._server_private_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=KEY_SIZE, backend=default_backend()
-        )
-        self._private_key_decryption: RSADecryption = RSADecryption(
-            self._server_private_key
+        self._server_rsa_cryption = RSACryption()
+        self._private_key_decryption: AsymmetricDecryption = AsymmetricDecryption(
+            self._server_rsa_cryption
         )
         self._communication_server = None
         self._communication_server_thread = None
@@ -139,20 +137,22 @@ class Client(RequestReceiver):
             raise RuntimeError("Unexpected response")
         return response.message.data
 
+    def connect_to_user(self, nickname: str) -> bool:
+        request = Request(Command.CONNECT_TO_USER, Message())
+
+    def send_message(self, nickname: str, message: str) -> bool:
+        request = Request(Command.MESSAGE, Message.from_data(Request()))
+
     def send_request(self, request: Request) -> Request:
         encrypted_request = self._encrypt(request)
         encrypted_response = self._send_data_and_receive(encrypted_request)
         return self._decrypt(encrypted_response)
 
     def _prepare_unencrypted_public_key_request(self) -> Request:
-        server_public_key = self._server_private_key.public_key()
-        stored_public_key = server_public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=PublicFormat.SubjectPublicKeyInfo,
-        )
-        public_key_hash = HASHING_ALGORITHM(stored_public_key).hexdigest()
+        serialized_public_key = self._server_rsa_cryption.public_key_serialized
+        public_key_hash = HASHING_ALGORITHM(serialized_public_key).hexdigest()
         request = Request(
-            Command.CONNECT, Message.from_data((stored_public_key, public_key_hash))
+            Command.CONNECT, Message.from_data((serialized_public_key, public_key_hash))
         )
         return request
 
