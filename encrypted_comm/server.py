@@ -7,14 +7,14 @@ from typing import Callable, Dict, List, Optional, Tuple
 from cryptography.fernet import Fernet
 
 from .common import (
-    AsymmetricEncryption,
+    AsymmetricEncryption, ChatMessage,
     Command,
     Cryption,
     FernetCryption,
-    IdentCryption,
+    IdemCryption,
     Message,
     Request,
-    RequestReceiver,
+    ConnectionHandler,
     Response,
     RSAEncryption,
 )
@@ -27,8 +27,8 @@ from .exception import (
 )
 
 
-class ClientConnection:
-    ZERO_CRYPTION = IdentCryption()
+class ClientConnection(ConnectionHandler):
+    ZERO_CRYPTION = IdemCryption()
 
     def __init__(self, client_uuid: uuid.UUID, register_request: bytes):
         self._lock = threading.Lock()
@@ -70,6 +70,11 @@ class ClientConnection:
                 raise ResponseAddressError(
                     "The response address for the connection is already set."
                 )
+
+    def send_request(self, request: Request) -> Request:
+        encrypted_request = self.encrypt(request)
+        encrypted_response = self.send_data_and_receive_response(encrypted_request, self.communication_address)
+        return self.decrypt(encrypted_response)
 
     def prepare_encrypted_symmetric_key(self) -> bytes:
         symmetric_key_hash = HASHING_ALGORITHM(self._symmetric_key).hexdigest()
@@ -136,33 +141,44 @@ class UserStorage:
             self._client_nicknames[nickname] = client
 
 
-class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver):
-    def __init__(self, request, client_address, server):
-        super().__init__(request, client_address, server)
-        self.logger = logging.getLogger(f"{__name__}[EncryptionMessageHandler]")
+class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandler):
+    IDEM_CRYPTION = IdemCryption()
+    LOGGER = logging.getLogger(f"{__name__}[EncryptionMessageHandler]")
 
     def setup(self):
         pass
 
+    def plain_response(self, request: Request):
+        return self.IDEM_CRYPTION.prepare_request_and_encrypt(request)
+
     def handle(self):
         heading, data = self.receive_data(self.request)
-        client_request: ClientRequest = self.server.client_storage.get_client_request(
-            data
-        )
-        if client_request.request.command_or_response in self.COMMANDS:
-            self.COMMANDS[client_request.request.command_or_response](
-                self, client_request
+        try:
+            client_request: ClientRequest = self.server.client_storage.get_client_request(
+                data
             )
+            if client_request.request.command_or_response in self.COMMANDS:
+                self.COMMANDS[client_request.request.command_or_response](
+                    self, client_request
+                )
+            else:
+                self._handle_error()
+        except Exception:
+            self._handle_error()
 
-    def _connect_command(self, client_request: ClientRequest,) -> None:
+    def _handle_error(self):
+        response = self.plain_response(Request(Response.ERROR, Message.zero_message()))
+        self.request.sendall(response)
+
+    def _connect_command(self, client_request: ClientRequest) -> None:
         encrypted_request = client_request.connection.prepare_encrypted_symmetric_key()
         self.request.sendall(encrypted_request)
 
-    def _register_command(self, client_request: ClientRequest,) -> None:
+    def _register_command(self, client_request: ClientRequest) -> None:
         client_response_address, client_nickname = client_request.request.message.data
         host = self.client_address[0]
         port = client_response_address[1]
-        client_request.connection.client_response_address = (host, port)
+        client_request.connection.communication_address = (host, port)
 
         try:
             self.server.user_storage.register(
@@ -186,8 +202,12 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
         )
         self.request.sendall(encrypted_message)
 
-    def _send_message_command(self, client_request: ClientRequest) -> None:
-        pass
+    def _message_command(self, client_request: ClientRequest) -> None:
+        chat_message = ChatMessage.from_message(client_request.request.message)
+        receiver_connection = self.server.user_storage.get_user_connection(chat_message.receiver)
+        sender_nickname = self.server.user_storage.get_connection_user(client_request.connection)
+        chat_message.sender = sender_nickname
+
 
     def _reset_command(self, client_request: ClientRequest) -> None:
         pass
@@ -199,7 +219,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, RequestReceiver)
         Command.CONNECT: _connect_command,
         Command.GET_USER_LIST: _get_user_list_command,
         Command.REGISTER: _register_command,
-        Command.MESSAGE: _send_message_command,
+        Command.MESSAGE: _message_command,
         Command.RESET: _reset_command,
     }
 

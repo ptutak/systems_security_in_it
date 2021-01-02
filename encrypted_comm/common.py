@@ -1,4 +1,5 @@
 import pickle
+import socket
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple, Union
@@ -40,28 +41,24 @@ class Response(Enum):
     NICKNAME_ALREADY_USED = "nickname_already_used"
     NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"
+    ERROR = "error"
 
 
 class Message:
-    def __init__(self, message: bytes, data: object):
-        self._bytes = message
-        self._data = data
+    def __init__(self, data: object):
+        self.data = data
 
     @property
-    def bytes(self):
-        return self._bytes
-
-    @property
-    def data(self):
-        return self._data
+    def bytes(self) -> bytes:
+        return pickle.dumps(self.data)
 
     @classmethod
     def from_bytes(cls, message: bytes):
-        return Message(message, pickle.loads(message))
+        return cls(pickle.loads(message))
 
     @classmethod
     def from_data(cls, data: object):
-        return Message(pickle.dumps(data), data)
+        return cls(data)
 
     @classmethod
     def zero_message(cls):
@@ -69,12 +66,36 @@ class Message:
 
 
 class ChatMessage(Message):
-    def __init__(self, sender: Optional[str], receiver: str, message: str):
-        (sender, receiver, message)
-        super().__init__()
-        self.sender = sender
-        self.receiver = receiver
-        self.message = message
+    def __init__(self, sender: Optional[str], receiver: str, message: bytes):
+        super().__init__((sender, receiver, message))
+
+    @property
+    def sender(self):
+        return self.data[0]
+
+    @sender.setter
+    def sender(self, nickname: str):
+        self.data[0] = nickname
+
+    @property
+    def receiver(self):
+        return self.data[1]
+
+    @property
+    def message(self):
+        return self.data[2]
+
+    @classmethod
+    def from_message(cls, message: Message) -> "ChatMessage":
+        return cls(message.data[0], message.data[1], message.data[2])
+
+    @classmethod
+    def from_bytes(cls, message: bytes) -> "ChatMessage":
+        return cls.from_message(super().from_bytes(message))
+
+    @classmethod
+    def from_data(cls, data: object) -> "ChatMessage":
+        return cls.from_message(super().from_data(data))
 
 
 class Request:
@@ -83,15 +104,25 @@ class Request:
         self.message = message
 
 
-class RequestReceiver:
+class ConnectionHandler:
     @classmethod
-    def receive_data(cls, request) -> Tuple[int, bytes]:
-        heading = request.recv(HEADING_LENGTH)
+    def receive_data(cls, connection) -> Tuple[int, bytes]:
+        heading = connection.recv(HEADING_LENGTH)
         data_length = int.from_bytes(
             heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
         )
-        data = request.recv(data_length)
+        data = connection.recv(data_length)
         return (data_length, data)
+
+    @classmethod
+    def send_data_and_receive_response(
+        cls, encrypted_data: bytes, address: Tuple[str, int]
+    ) -> bytes:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.connect(address)
+            connection.sendall(encrypted_data)
+            heading, data = cls.receive_data(connection)
+            return data
 
 
 class RSAEncryption:
@@ -207,7 +238,7 @@ class Cryption(ABC):
         return Request(command_or_response, Message.from_bytes(message))
 
 
-class IdentCryption(Cryption):
+class IdemCryption(Cryption):
     def __init__(self):
         super().__init__(ZERO_UUID, ZERO_UUID)
 
