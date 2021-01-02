@@ -3,7 +3,7 @@ import pickle
 import socket
 import socketserver
 import threading
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .common import (
     AsymmetricDecryption, ChatMessage,
@@ -31,30 +31,41 @@ class ClientConnection:
 class ClientConnections:
     def __init__(self):
         self._lock = threading.Lock()
-        self._storage = {}
+        self._nickname_connections: Dict[str, ClientConnection] = {}
+        self._connection_nicknames: Dict[ClientConnection, str] = {}
 
-    def update_list(self, client_list: List[str]) -> None:
-        with self._lock:
-            for client in client_list:
-                if client not in self._storage:
-                    self._storage[client] = ClientConnection()
-            for client in self._storage:
-                if client not in client_list:
-                    del self._storage[client]
+    def get_connection(self, nickname: str) -> Optional[ClientConnection]:
+        return self._nickname_connections.get(nickname, None)
 
-    def new_user(self, nickname: str, rsa_cryption: RSACryption) -> ClientConnection:
-        with self._lock:
-            if nickname not in self._storage:
-                self._storage[nickname] = ClientConnection(rsa_cryption)
-                return self._storage[nickname]
-            else:
-                raise RuntimeError("Nickname already registered")
+    def get_nickname(self, connection: ClientConnection) -> Optional[str]:
+        return self._connection_nicknames.get(connection, None)
 
-    def get_client(self, nickname: str) -> Optional[ClientConnection]:
+    def get_user_list(self) -> List[str]:
+        return list(self._nickname_connections.keys())
+
+    def register(self, nickname: str, client_connection: ClientConnection) -> None:
         with self._lock:
-            if nickname not in self._storage:
-                return None
-            return self._storage[nickname]
+            if self._connection_nicknames.get(client_connection) is not None:
+                raise RuntimeError("Connection already registered.")
+            if self._nickname_connections.get(nickname) is not None:
+                raise RuntimeError("Nickname already registered.")
+
+            self._connection_nicknames[client_connection] = nickname
+            self._nickname_connections[nickname] = client_connection
+
+    def deregister_connection(self, client_connection: ClientConnection) -> None:
+        with self._lock:
+            if client_connection in self._connection_nicknames:
+                nickname = self._connection_nicknames[client_connection]
+                del self._connection_nicknames[client_connection]
+                del self._nickname_connections[nickname]
+
+    def deregister_nickname(self, nickname: str) -> None:
+        with self._lock:
+            if nickname in self._nickname_connections:
+                connection = self._nickname_connections[nickname]
+                del self._nickname_connections[nickname]
+                del self._connection_nicknames[connection]
 
 
 class CommunicationHandler(socketserver.BaseRequestHandler):
@@ -78,9 +89,6 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
         super().__init__(server_address, handler_class)
         self.destination_server_address = destination_server_address
         self.client_storage = ClientConnections()
-
-    def new_connection(self, nickname: str, cryption: RSACryption) -> None:
-        self.client_storage.new_user(nickname, cryption)
 
 
 class Client(EncryptingConnectionHandler):
@@ -178,6 +186,15 @@ class Client(EncryptingConnectionHandler):
         bytes_data = pickle.dumps(data)
         request = Request(Command.CONNECT_TO_USER, ChatMessage(None, nickname, bytes_data))
         response = self.send_request(request)
+        if response.command_or_response != Response.CONNECTION_SUCCESS:
+            raise RuntimeError("Connection failed")
+        message = ChatMessage.from_message(response.message)
+
+        symmetric_key, symmetric_key_hash = message.message
+        if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
+            raise RuntimeError("Symmetric key hash error.")
+
+        self._communication_server.client_storage.new_user(nickname, symmetric_key)
 
     def send_message(self, nickname: str, message: str) -> bool:
         request = Request(Command.MESSAGE, Message.from_data(Request()))
