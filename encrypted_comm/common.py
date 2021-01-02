@@ -10,10 +10,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import PublicFormat
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.asymmetric.rsa import (
-    RSAPrivateKeyWithSerialization,
-    RSAPublicKey,
-)
+
 
 from .constants import (
     HEADING_BYTEORDER,
@@ -110,7 +107,7 @@ class RSAEncryption:
 
     @classmethod
     def from_serialized_key(cls, public_key_serialized) -> "RSAEncryption":
-        public_key: RSAPublicKey = serialization.load_pem_public_key(
+        public_key: rsa.RSAPublicKey = serialization.load_pem_public_key(
             public_key_serialized, default_backend()
         )
         return RSAEncryption(public_key)

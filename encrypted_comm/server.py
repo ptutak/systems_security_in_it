@@ -5,12 +5,10 @@ import uuid
 from typing import Callable, Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from .common import (
-    AsymmetricEncryption, Command,
+    AsymmetricEncryption,
+    Command,
     Cryption,
     FernetCryption,
     IdentCryption,
@@ -52,7 +50,9 @@ class ClientConnection:
 
         encryption = RSAEncryption.from_serialized_key(public_key)
 
-        self._public_key_cryption: AsymmetricEncryption = AsymmetricEncryption(client_uuid, secret_uuid, encryption)
+        self._public_key_cryption: AsymmetricEncryption = AsymmetricEncryption(
+            client_uuid, secret_uuid, encryption
+        )
 
     @property
     def communication_address(self):
