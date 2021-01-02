@@ -1,7 +1,7 @@
 import pickle
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Union
+from typing import Tuple, Union
 from uuid import UUID
 
 from cryptography.fernet import Fernet
@@ -64,13 +64,13 @@ class Request:
 
 class RequestReceiver:
     @classmethod
-    def receive_data(cls, request):
+    def receive_data(cls, request) -> Tuple[int, bytes]:
         heading = request.recv(HEADING_LENGTH)
         data_length = int.from_bytes(
             heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
         )
         data = request.recv(data_length)
-        return (heading, data)
+        return (data_length, data)
 
 
 class Cryption(ABC):

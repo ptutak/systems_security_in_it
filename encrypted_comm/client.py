@@ -104,7 +104,7 @@ class Client(RequestReceiver):
         data_with_secret_uuid = self.ZERO_CRYPTION.prepare_request_and_encrypt(
             unencrypted_public_key
         )
-        encrypted_request = self._send_data_and_get_response(data_with_secret_uuid)
+        encrypted_request = self._send_data_and_receive(data_with_secret_uuid)
         request = self._private_key_decryption.decrypt_and_get_request(
             encrypted_request
         )
@@ -120,28 +120,29 @@ class Client(RequestReceiver):
     def register(self, nickname: str) -> bool:
         if self._communication_server is None:
             self.initiate_communication_server()
-        data = Request(
+        request = Request(
             Command.REGISTER,
             Message.from_data((self._communication_server.server_address, nickname)),
         )
-        encrypted_data = self._encrypt(data)
-        response = self._send_data_and_get_response(encrypted_data)
-        request = self._decrypt(response)
-        if request.command_or_response == Response.NICKNAME_ALREADY_USED:
+        response = self.send_request(request)
+        if response.command_or_response == Response.NICKNAME_ALREADY_USED:
             return False
-        elif request.command_or_response == Response.NICKNAME_REGISTRATION_SUCCESS:
+        elif response.command_or_response == Response.NICKNAME_REGISTRATION_SUCCESS:
             return True
         else:
             raise RuntimeError("Unexpected response")
 
     def get_user_list(self) -> List[str]:
         request = Request(Command.GET_USER_LIST, Message.zero_message())
-        encrypted_data = self._encrypt(request)
-        response = self._send_data_and_get_response(encrypted_data)
-        request = self._decrypt(response)
-        if request.command_or_response != Response.USER_LIST:
+        response = self.send_request(request)
+        if response.command_or_response != Response.USER_LIST:
             raise RuntimeError("Unexpected response")
-        return request.message.data
+        return response.message.data
+
+    def send_request(self, request: Request) -> Request:
+        encrypted_request = self._encrypt(request)
+        encrypted_response = self._send_data_and_receive(encrypted_request)
+        return self._decrypt(encrypted_response)
 
     def _prepare_unencrypted_public_key_request(self) -> Request:
         server_public_key = self._server_private_key.public_key()
@@ -161,7 +162,7 @@ class Client(RequestReceiver):
     def _decrypt(self, encrypted_request: bytes) -> Request:
         return self._server_cryption.decrypt_and_get_request(encrypted_request)
 
-    def _send_data_and_get_response(self, encrypted_data: bytes):
+    def _send_data_and_receive(self, encrypted_data: bytes):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
             connection.connect(self._server_address)
             connection.sendall(encrypted_data)
