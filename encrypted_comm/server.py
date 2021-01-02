@@ -7,9 +7,11 @@ from typing import Callable, Dict, List, Optional, Tuple
 from cryptography.fernet import Fernet
 
 from .common import (
-    AsymmetricEncryption, ChatMessage,
+    AsymmetricEncryption,
+    ChatMessage,
     Command,
-    Cryption, EncryptingConnectionHandler,
+    Cryption,
+    EncryptingConnectionHandler,
     FernetCryption,
     IdemCryption,
     Message,
@@ -173,9 +175,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
 
     def handle(self):
         heading, data = self.receive_data(self.request)
-        client_request: ClientRequest = self.client_storage.get_client_request(
-            data
-        )
+        client_request: ClientRequest = self.client_storage.get_client_request(data)
         if client_request.request.command_or_response in self.COMMANDS:
             self.COMMANDS[client_request.request.command_or_response](
                 self, client_request

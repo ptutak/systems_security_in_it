@@ -1,6 +1,6 @@
 import pickle
 import socket
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple, Union
 from uuid import UUID

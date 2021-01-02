@@ -1,14 +1,15 @@
 import logging
 import pickle
-import socket
 import socketserver
 import threading
 from typing import Dict, List, Optional, Tuple
 
 from .common import (
-    AsymmetricDecryption, ChatMessage,
+    AsymmetricDecryption,
+    ChatMessage,
     Command,
-    Cryption, EncryptingConnectionHandler,
+    Cryption,
+    EncryptingConnectionHandler,
     FernetCryption,
     IdemCryption,
     Message,
@@ -131,7 +132,9 @@ class Client(EncryptingConnectionHandler):
             unencrypted_public_key_request
         )
 
-        encrypted_response = self.send_data_and_receive_response(prepared_datagram, self._server_address)
+        encrypted_response = self.send_data_and_receive_response(
+            prepared_datagram, self._server_address
+        )
 
         request = self._private_key_decryption.decrypt_and_get_request(
             encrypted_response
@@ -184,7 +187,9 @@ class Client(EncryptingConnectionHandler):
         serialized_key = rsa_cryption.public_key_serialized
         data = (serialized_key, HASHING_ALGORITHM(serialized_key).hexdigest())
         bytes_data = pickle.dumps(data)
-        request = Request(Command.CONNECT_TO_USER, ChatMessage(None, nickname, bytes_data))
+        request = Request(
+            Command.CONNECT_TO_USER, ChatMessage(None, nickname, bytes_data)
+        )
         response = self.send_request(request)
         if response.command_or_response != Response.CONNECTION_SUCCESS:
             raise RuntimeError("Connection failed")
