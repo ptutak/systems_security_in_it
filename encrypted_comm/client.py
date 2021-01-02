@@ -7,14 +7,13 @@ from typing import List, Optional, Tuple
 
 from .common import (
     AsymmetricDecryption, ChatMessage,
-    Command, ConnectionHandler,
-    Cryption,
+    Command,
+    Cryption, EncryptingConnectionHandler,
     FernetCryption,
     IdemCryption,
     Message,
     RSACryption,
     Request,
-    RequestReceiver,
     Response,
 )
 
@@ -84,7 +83,7 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
         self.client_storage.new_user(nickname, cryption)
 
 
-class Client(ConnectionHandler):
+class Client(EncryptingConnectionHandler):
     ZERO_CRYPTION = IdemCryption()
 
     def __init__(self, server_address: Tuple[str, int]) -> int:
@@ -96,6 +95,14 @@ class Client(ConnectionHandler):
         self._communication_server: Optional[CommunicationServer] = None
         self._communication_server_thread = None
         self._server_cryption: Cryption = IdemCryption()
+
+    @property
+    def communication_address(self) -> Tuple[str, int]:
+        return self._server_address
+
+    @property
+    def cryption(self) -> Cryption:
+        return self._server_cryption
 
     def initiate_communication_server(self):
         self._communication_server = CommunicationServer(
@@ -111,21 +118,36 @@ class Client(ConnectionHandler):
 
     def connect_to_server(self):
         unencrypted_public_key_request = self._prepare_unencrypted_public_key_request()
+
         prepared_datagram = self.ZERO_CRYPTION.prepare_request_and_encrypt(
             unencrypted_public_key_request
         )
+
         encrypted_response = self.send_data_and_receive_response(prepared_datagram, self._server_address)
+
         request = self._private_key_decryption.decrypt_and_get_request(
             encrypted_response
         )
+
         if request.command_or_response != Response.CONNECTION_SUCCESS:
             raise RuntimeError("Connection failed")
+
         uuid = self._private_key_decryption.uuid
         secret_uuid = self._private_key_decryption.secret_uuid
         symmetric_key, symmetric_key_hash = request.message.data
+
         if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
             raise AuthenticationError("Error while processing keys")
+
         self._server_cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
+
+    def _prepare_unencrypted_public_key_request(self) -> Request:
+        serialized_public_key = self._server_rsa_cryption.public_key_serialized
+        public_key_hash = HASHING_ALGORITHM(serialized_public_key).hexdigest()
+        request = Request(
+            Command.CONNECT, Message.from_data((serialized_public_key, public_key_hash))
+        )
+        return request
 
     def register(self, nickname: str) -> bool:
         if self._communication_server is None:
@@ -159,22 +181,3 @@ class Client(ConnectionHandler):
 
     def send_message(self, nickname: str, message: str) -> bool:
         request = Request(Command.MESSAGE, Message.from_data(Request()))
-
-    def send_request(self, request: Request) -> Request:
-        encrypted_request = self._encrypt(request)
-        encrypted_response = self.send_data_and_receive_response(encrypted_request, self._server_address)
-        return self._decrypt(encrypted_response)
-
-    def _prepare_unencrypted_public_key_request(self) -> Request:
-        serialized_public_key = self._server_rsa_cryption.public_key_serialized
-        public_key_hash = HASHING_ALGORITHM(serialized_public_key).hexdigest()
-        request = Request(
-            Command.CONNECT, Message.from_data((serialized_public_key, public_key_hash))
-        )
-        return request
-
-    def _encrypt(self, request: Request) -> bytes:
-        return self._server_cryption.prepare_request_and_encrypt(request)
-
-    def _decrypt(self, encrypted_request: bytes) -> Request:
-        return self._server_cryption.decrypt_and_get_request(encrypted_request)

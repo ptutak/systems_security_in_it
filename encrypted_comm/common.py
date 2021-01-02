@@ -1,6 +1,6 @@
 import pickle
 import socket
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 from enum import Enum
 from typing import Optional, Tuple, Union
 from uuid import UUID
@@ -102,27 +102,6 @@ class Request:
     def __init__(self, command_or_response: Union[Command, Response], message: Message):
         self.command_or_response = command_or_response
         self.message = message
-
-
-class ConnectionHandler:
-    @classmethod
-    def receive_data(cls, connection) -> Tuple[int, bytes]:
-        heading = connection.recv(HEADING_LENGTH)
-        data_length = int.from_bytes(
-            heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
-        )
-        data = connection.recv(data_length)
-        return (data_length, data)
-
-    @classmethod
-    def send_data_and_receive_response(
-        cls, encrypted_data: bytes, address: Tuple[str, int]
-    ) -> bytes:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
-            connection.connect(address)
-            connection.sendall(encrypted_data)
-            heading, data = cls.receive_data(connection)
-            return data
 
 
 class RSAEncryption:
@@ -293,3 +272,53 @@ class AsymmetricDecryption(Cryption):
         uuid = encrypted_message[0:16]
         self._uuid = UUID(bytes=uuid)
         return encrypted_message[16:]
+
+
+class ConnectionHandler:
+    @classmethod
+    def receive_data(cls, connection) -> Tuple[int, bytes]:
+        heading = connection.recv(HEADING_LENGTH)
+        data_length = int.from_bytes(
+            heading, byteorder=HEADING_BYTEORDER, signed=HEADING_SIGNED,
+        )
+        data = connection.recv(data_length)
+        return (data_length, data)
+
+    @classmethod
+    def send_data_and_receive_response(
+        cls, encrypted_data: bytes, address: Tuple[str, int]
+    ) -> bytes:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.connect(address)
+            connection.sendall(encrypted_data)
+            heading, data = cls.receive_data(connection)
+            return data
+
+
+class EncryptingConnectionHandler(ConnectionHandler, ABC):
+    @property
+    @abstractmethod
+    def cryption(self) -> Cryption:
+        """
+        Cryption.
+        """
+
+    @property
+    @abstractmethod
+    def communication_address(self) -> Tuple[str, int]:
+        """
+        Address to send and receive requests.
+        """
+
+    def encrypt(self, request: Request) -> bytes:
+        return self.cryption.prepare_request_and_encrypt(request)
+
+    def decrypt(self, encrypted_response: bytes) -> Request:
+        return self.cryption.decrypt_and_get_request(encrypted_response)
+
+    def send_request(self, request: Request) -> Request:
+        encrypted_request = self.encrypt(request)
+        encrypted_response = self.send_data_and_receive_response(
+            encrypted_request, self.communication_address
+        )
+        return self.decrypt(encrypted_response)
