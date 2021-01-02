@@ -133,13 +133,13 @@ class UserStorage:
 
     def register(self, nickname: str, client_connection: ClientConnection) -> None:
         with self._lock:
-            if self._connection_nicknames.get(nickname) is not None:
-                raise RegistrationError("Nickname already registered.")
-            if self._nickname_connections.get(client_connection) is not None:
+            if self._connection_nicknames.get(client_connection) is not None:
                 raise RegistrationError("Connection already registered.")
+            if self._nickname_connections.get(nickname) is not None:
+                raise RegistrationError("Nickname already registered.")
 
-            self._connection_nicknames[nickname] = client_connection
-            self._nickname_connections[client_connection] = nickname
+            self._connection_nicknames[client_connection] = nickname
+            self._nickname_connections[nickname] = client_connection
 
     def deregister_connection(self, client_connection: ClientConnection) -> None:
         with self._lock:
@@ -171,27 +171,24 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
     def setup(self):
         pass
 
-    def plain_response(self, request: Request):
-        return self.IDEM_CRYPTION.prepare_request_and_encrypt(request)
-
     def handle(self):
         heading, data = self.receive_data(self.request)
-        try:
-            client_request: ClientRequest = self.client_storage.get_client_request(
-                data
+        client_request: ClientRequest = self.client_storage.get_client_request(
+            data
+        )
+        if client_request.request.command_or_response in self.COMMANDS:
+            self.COMMANDS[client_request.request.command_or_response](
+                self, client_request
             )
-            if client_request.request.command_or_response in self.COMMANDS:
-                self.COMMANDS[client_request.request.command_or_response](
-                    self, client_request
-                )
-            else:
-                self._handle_error()
-        except Exception:
-            self._handle_error()
+        else:
+            self.handle_error("No such command")
 
-    def _handle_error(self):
-        response = self.plain_response(Request(Response.ERROR, Message.zero_message()))
+    def handle_error(self, message: str):
+        response = self.plain_response(Request(Response.ERROR, Message(message)))
         self.request.sendall(response)
+
+    def plain_response(self, request: Request):
+        return self.IDEM_CRYPTION.prepare_request_and_encrypt(request)
 
     def _connect_command(self, client_request: ClientRequest) -> None:
         encrypted_request = client_request.connection.prepare_encrypted_symmetric_key()
@@ -225,41 +222,41 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         )
         self.request.sendall(encrypted_message)
 
-    def _connect_to_user_command(self, client_request: ClientRequest) -> None:
+    def _communicate_command(self, client_request: ClientRequest) -> None:
         chat_message = ChatMessage.from_message(client_request.request.message)
         receiver_connection = self.user_storage.get_connection(chat_message.receiver)
         if receiver_connection is None:
             encrypted_error_message = client_request.connection.encrypt(
-                Request(Response.ERROR, Message("No such user"))
+                Request(Response.USER_NOT_REGISTERED, Message("No such user"))
             )
             self.request.sendall(encrypted_error_message)
             return
 
         sender_nickname = self.user_storage.get_nickname(client_request.connection)
         if sender_nickname is None:
+            encrypted_error_message = client_request.connection.encrypt(
+                Request(Response.CLIENT_NOT_REGISTERED, Message("Register first"))
+            )
+            self.request.sendall(encrypted_error_message)
             return
+
         chat_message.sender = sender_nickname
 
-    def _message_command(self, client_request: ClientRequest) -> None:
-        chat_message = ChatMessage.from_message(client_request.request.message)
-        receiver_connection = self.user_storage.get_user_connection(chat_message.receiver)
-        sender_nickname = self.user_storage.get_connection_user(client_request.connection)
-        chat_message.sender = sender_nickname
-
-
-    def _reset_command(self, client_request: ClientRequest) -> None:
-        pass
+        response = receiver_connection.send_request(
+            Request(client_request.request.command_or_response, chat_message)
+        )
+        encrypted_response = client_request.connection.encrypt(response)
+        self.request.sendall(encrypted_response)
 
     def finish(self):
         pass
 
     COMMANDS: Dict[Command, Callable] = {
         Command.CONNECT: _connect_command,
-        Command.CONNECT_TO_USER: _connect_to_user_command,
+        Command.CONNECT_TO_USER: _communicate_command,
+        Command.MESSAGE: _communicate_command,
         Command.GET_USER_LIST: _get_user_list_command,
         Command.REGISTER: _register_command,
-        Command.MESSAGE: _message_command,
-        Command.RESET: _reset_command,
     }
 
 
