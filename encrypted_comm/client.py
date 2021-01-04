@@ -35,6 +35,14 @@ class Observer(ABC):
         """
 
 
+class ObserverCreator(ABC):
+    @abstractmethod
+    def create(self) -> Observer:
+        """
+        Creates an observer
+        """
+
+
 class ClientConnection:
     def __init__(self, sym_key: bytes):
         self._cryption = Fernet(sym_key)
@@ -120,6 +128,10 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
     def cryption(self) -> Cryption:
         return self.server.server_cryption
 
+    @property
+    def observer_creator(self) -> ObserverCreator:
+        return self.server.observer_creator
+
     def receive_request(self, request) -> Request:
         data_length, data = self.receive_data(request)
         return self.decrypt(data)
@@ -163,19 +175,23 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
         self,
         server_address,
         *,
-        destination_server_address,
+        destination_server_address: Tuple[str, int],
+        observer_creator: ObserverCreator,
         handler_class=CommunicationHandler,
     ) -> None:
         super().__init__(server_address, handler_class)
         self.destination_server_address = destination_server_address
         self.client_connections = ClientConnections()
         self.server_cryption = IdemCryption()
+        self.observer_creator = observer_creator
 
 
 class Client(EncryptingConnectionHandler):
     ZERO_CRYPTION = IdemCryption()
 
-    def __init__(self, server_address: Tuple[str, int]) -> int:
+    def __init__(
+        self, server_address: Tuple[str, int], observer_creator: ObserverCreator
+    ) -> int:
         self._server_address = server_address
         self._server_rsa_cryption = RSACryption()
         self._private_key_decryption: AsymmetricDecryption = AsymmetricDecryption(
@@ -184,6 +200,7 @@ class Client(EncryptingConnectionHandler):
         self._communication_server: Optional[CommunicationServer] = None
         self._communication_server_thread = None
         self._server_cryption: Cryption = IdemCryption()
+        self._observer_creator = observer_creator
 
     @property
     def communication_address(self) -> Tuple[str, int]:
@@ -197,6 +214,7 @@ class Client(EncryptingConnectionHandler):
         self._communication_server = CommunicationServer(
             ("localhost", 0),
             destination_server_address=self._server_address,
+            observer_creator=self._observer_creator,
             handler_class=CommunicationHandler,
         )
         self._communication_server_thread = threading.Thread(
@@ -263,7 +281,7 @@ class Client(EncryptingConnectionHandler):
         user_list = response.message.data
         return user_list
 
-    def connect_to_user(self, nickname: str, observer: Observer) -> bool:
+    def connect_to_user(self, nickname: str) -> bool:
         rsa_cryption = RSACryption()
         serialized_key = rsa_cryption.public_key_serialized
         data = (serialized_key, HASHING_ALGORITHM(serialized_key).hexdigest())
@@ -283,7 +301,7 @@ class Client(EncryptingConnectionHandler):
         new_connection = self._communication_server.client_connections.new_connection(
             nickname, symmetric_key
         )
-        new_connection.attach(observer)
+        new_connection.attach(self._observer_creator.create())
 
     def send_message(self, nickname: str, message: str) -> bool:
         request = Request(Command.MESSAGE, Message.from_data(Request()))
