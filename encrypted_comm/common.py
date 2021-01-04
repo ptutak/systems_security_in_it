@@ -78,7 +78,8 @@ class ChatMessage(Message):
 
     @sender.setter
     def sender(self, nickname: str):
-        self.data[0] = nickname
+        data = self.data
+        self.data = (nickname, data[1], data[2])
 
     @property
     def receiver(self):

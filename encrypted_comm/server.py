@@ -22,10 +22,10 @@ from .common import (
 )
 from .constants import HASHING_ALGORITHM
 from .exception import (
-    InvalidCommand,
+    AuthenticationError, InvalidCommand,
     RegistrationError,
     ResponseAddressError,
-    ShasumError,
+    ConnectionError,
 )
 
 
@@ -41,14 +41,18 @@ class ClientConnection(EncryptingConnectionHandler):
         )
 
         self._client_communication_address = None
-        request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
+        try:
+            request = self.ZERO_CRYPTION.decrypt_and_get_request(register_request)
+        except AuthenticationError as e:
+            raise ConnectionError("No leading ZERO UUID on connection creation.") from e
+
         command, public_key_composit = request.command_or_response, request.message.data
         if command != Command.CONNECT:
             raise InvalidCommand("Expected CONNECT command.")
 
         public_key, public_key_sha256 = public_key_composit
         if HASHING_ALGORITHM(public_key).hexdigest() != public_key_sha256:
-            raise ShasumError("The public key has been tampered.")
+            raise RuntimeError("Wrong public key hash")
 
         encryption = RSAEncryption.from_serialized_key(public_key)
 
@@ -175,17 +179,34 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
 
     def handle(self):
         heading, data = self.receive_data(self.request)
-        client_request: ClientRequest = self.client_storage.get_client_request(data)
-        if client_request.request.command_or_response in self.COMMANDS:
-            self.COMMANDS[client_request.request.command_or_response](
-                self, client_request
-            )
-        else:
-            self.handle_error("No such command")
+        try:
+            client_request: ClientRequest = self.client_storage.get_client_request(data)
+        except Exception as e:
+            self.handle_error(f"{e}")
+            return
+
+        try:
+            if client_request.request.command_or_response in self.COMMANDS:
+                self.COMMANDS[client_request.request.command_or_response](
+                    self, client_request
+                )
+            else:
+                self.handle_encrypted_error(client_request, "No such command")
+        except Exception as e:
+            self.handle_encrypted_error(client_request, f"{e}")
 
     def handle_error(self, message: str):
         response = self.plain_response(Request(Response.ERROR, Message(message)))
         self.request.sendall(response)
+        self.LOGGER.error(f"ERROR: {self.client_address} {message}")
+
+    def handle_encrypted_error(self, client_request: ClientRequest, message: str) -> None:
+        response = Request(Response.ERROR, Message(message))
+        self.request.sendall(client_request.connection.encrypt(response))
+        self.LOGGER.error(
+            f"ERROR: {self.client_address} {client_request.request.command_or_response} "
+            f"{client_request.request.message} {message}"
+        )
 
     def plain_response(self, request: Request):
         return self.IDEM_CRYPTION.prepare_request_and_encrypt(request)

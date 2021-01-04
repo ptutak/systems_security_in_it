@@ -30,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 
 class Observer(ABC):
     @abstractmethod
-    def update(self, message: str) -> None:
+    def update(self, nickname: str, message: str) -> None:
         """
         Update observer with a state message
         """
@@ -45,10 +45,15 @@ class ObserverCreator(ABC):
 
 
 class ClientConnection:
-    def __init__(self, sym_key: bytes):
+    def __init__(self, nickname: str, sym_key: bytes):
+        self._nickname = nickname
         self._cryption = Fernet(sym_key)
         self._lock = threading.Lock()
         self._observers: List[Observer] = list()
+
+    @property
+    def nickname(self) -> str:
+        return self._nickname
 
     def encrypt(self, data: object) -> bytes:
         return self._cryption.encrypt(pickle.dumps(data))
@@ -70,7 +75,7 @@ class ClientConnection:
     def notify(self, message: str) -> None:
         with self._lock:
             for observer in self._observers:
-                observer.update(message)
+                observer.update(self._nickname, message)
 
 
 class ClientConnections:
@@ -89,16 +94,17 @@ class ClientConnections:
         return list(self._nickname_connections.keys())
 
     def new_connection(self, nickname: str, sym_key: bytes) -> ClientConnection:
-        connection = ClientConnection(sym_key)
-        self.register(nickname, connection)
+        connection = ClientConnection(nickname, sym_key)
+        self.register(connection)
         return connection
 
-    def register(self, nickname: str, client_connection: ClientConnection) -> None:
+    def register(self, client_connection: ClientConnection) -> None:
+        nickname = client_connection.nickname
         with self._lock:
             if self._connection_nicknames.get(client_connection) is not None:
                 raise RuntimeError("Connection already registered.")
             if self._nickname_connections.get(nickname) is not None:
-                raise RuntimeError("Nickname already registered.")
+                raise RuntimeError(f"Nickname already registered:{self._nickname_connections}")
 
             self._connection_nicknames[client_connection] = nickname
             self._nickname_connections[nickname] = client_connection
@@ -152,16 +158,13 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
         return self.cryption.prepare_request_and_encrypt(request)
 
     def handle(self) -> None:
-        if self.request.client_address != self.server.destination_server_address:
-            LOGGER.warning("Bad client address")
-            return
         request = self.receive_request(self.request)
         command = request.command_or_response
         if command not in self.COMMANDS:
             wrong_command = Request(Response.WRONG_COMMAND, Message.zero_message())
             self.request.sendall(self.encrypt(wrong_command))
             return
-        self.COMMANDS[command](request)
+        self.COMMANDS[command](self, request)
 
     def _connect_to_user(self, request: Request) -> None:
         chat_message = ChatMessage.from_message(request.message)
@@ -323,7 +326,9 @@ class Client(EncryptingConnectionHandler):
             raise RuntimeError(f"Connection failed: {response.command_or_response}")
         message = ChatMessage.from_message(response.message)
 
-        symmetric_key, symmetric_key_hash = message.message
+        decrypted_message = rsa_cryption.decrypt(message.message)
+        symmetric_key, symmetric_key_hash = pickle.loads(decrypted_message)
+
         if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
             raise RuntimeError("Symmetric key hash error.")
 
