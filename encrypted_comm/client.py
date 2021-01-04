@@ -263,7 +263,7 @@ class Client(EncryptingConnectionHandler):
         user_list = response.message.data
         return user_list
 
-    def connect_to_user(self, nickname: str) -> bool:
+    def connect_to_user(self, nickname: str, observer: Observer) -> bool:
         rsa_cryption = RSACryption()
         serialized_key = rsa_cryption.public_key_serialized
         data = (serialized_key, HASHING_ALGORITHM(serialized_key).hexdigest())
@@ -283,6 +283,7 @@ class Client(EncryptingConnectionHandler):
         new_connection = self._communication_server.client_connections.new_connection(
             nickname, symmetric_key
         )
+        new_connection.attach(observer)
 
     def send_message(self, nickname: str, message: str) -> bool:
         request = Request(Command.MESSAGE, Message.from_data(Request()))
