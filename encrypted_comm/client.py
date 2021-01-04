@@ -4,20 +4,22 @@ import socketserver
 import threading
 from typing import Dict, List, Optional, Tuple
 
+from cryptography.fernet import Fernet
+
 from .common import (
     AsymmetricDecryption,
     ChatMessage,
     Command,
+    ConnectionHandler,
     Cryption,
     EncryptingConnectionHandler,
     FernetCryption,
     IdemCryption,
     Message,
-    RSACryption,
     Request,
     Response,
+    RSACryption,
 )
-
 from .constants import HASHING_ALGORITHM
 from .exception import AuthenticationError
 
@@ -25,8 +27,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ClientConnection:
-    def __init__(self, rsa_cryption: RSACryption):
-        self._rsa_cryption = rsa_cryption
+    def __init__(self, sym_key: bytes):
+        self._cryption = Fernet(sym_key)
+
+    def encrypt(self, data: object) -> bytes:
+        return self._cryption.encrypt(pickle.dumps(data))
+
+    def decrypt(self, message: bytes) -> object:
+        return pickle.loads(self._cryption.decrypt(message))
 
 
 class ClientConnections:
@@ -43,6 +51,11 @@ class ClientConnections:
 
     def get_user_list(self) -> List[str]:
         return list(self._nickname_connections.keys())
+
+    def new_connection(self, nickname: str, sym_key: bytes) -> ClientConnection:
+        connection = ClientConnection(sym_key)
+        self.register(nickname, connection)
+        return connection
 
     def register(self, nickname: str, client_connection: ClientConnection) -> None:
         with self._lock:
@@ -69,14 +82,53 @@ class ClientConnections:
                 del self._connection_nicknames[connection]
 
 
-class CommunicationHandler(socketserver.BaseRequestHandler):
+class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
+
+    IDEM_CRYPTION = IdemCryption()
+
     def __init__(self, request, client_address, server) -> None:
         super().__init__(request, client_address, server)
+
+    @property
+    def cryption(self) -> Cryption:
+        return self.server.server_cryption
+
+    def receive_request(self, request) -> Request:
+        data_length, data = self.receive_data(request)
+        return self.decrypt(data)
+
+    def decrypt(self, data: bytes) -> Request:
+        return self.cryption.decrypt_and_get_request(data)
+
+    def error_response(self, error_message: str) -> bytes:
+        request = Request(Response.ERROR, Message(error_message))
+        return self.encrypt(request)
+
+    def encrypt(self, request: Request) -> bytes:
+        return self.cryption.prepare_request_and_encrypt(request)
 
     def handle(self) -> None:
         if self.request.client_address != self.server.destination_server_address:
             LOGGER.warning("Bad client address")
             return
+        request = self.receive_request(self.request)
+        command = request.command_or_response
+        if command not in self.COMMANDS:
+            wrong_command = Request(Response.WRONG_COMMAND, Message.zero_message())
+            self.request.sendall(self.encrypt(wrong_command))
+            return
+        self.COMMANDS[command](request)
+
+    def _connect_to_user(self, request: Request) -> None:
+        pass
+
+    def _message(self, request: Request) -> None:
+        pass
+
+    COMMANDS = {
+        Command.CONNECT_TO_USER: _connect_to_user,
+        Command.MESSAGE: _message,
+    }
 
 
 class CommunicationServer(socketserver.ThreadingTCPServer):
@@ -89,7 +141,8 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
     ) -> None:
         super().__init__(server_address, handler_class)
         self.destination_server_address = destination_server_address
-        self.client_storage = ClientConnections()
+        self.client_connections = ClientConnections()
+        self.server_cryption = IdemCryption()
 
 
 class Client(EncryptingConnectionHandler):
@@ -151,6 +204,7 @@ class Client(EncryptingConnectionHandler):
             raise AuthenticationError("Error while processing keys")
 
         self._server_cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
+        self._communication_server.server_cryption = self._server_cryption
 
     def _prepare_unencrypted_public_key_request(self) -> Request:
         serialized_public_key = self._server_rsa_cryption.public_key_serialized
@@ -199,7 +253,9 @@ class Client(EncryptingConnectionHandler):
         if HASHING_ALGORITHM(symmetric_key).hexdigest() != symmetric_key_hash:
             raise RuntimeError("Symmetric key hash error.")
 
-        self._communication_server.client_storage.new_user(nickname, symmetric_key)
+        new_connection = self._communication_server.client_connections.new_connection(
+            nickname, symmetric_key
+        )
 
     def send_message(self, nickname: str, message: str) -> bool:
         request = Request(Command.MESSAGE, Message.from_data(Request()))

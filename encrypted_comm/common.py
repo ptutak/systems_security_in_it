@@ -5,13 +5,11 @@ from enum import Enum
 from typing import Optional, Tuple, Union
 from uuid import UUID
 
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import PublicFormat
-
-from cryptography.fernet import Fernet
-
 
 from .constants import (
     HEADING_BYTEORDER,
@@ -43,6 +41,7 @@ class Response(Enum):
     NICKNAME_ALREADY_USED = "nickname_already_used"
     NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"
+    WRONG_COMMAND = "wrong_command"
     ERROR = "error"
 
 
