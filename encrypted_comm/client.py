@@ -104,7 +104,9 @@ class ClientConnections:
             if self._connection_nicknames.get(client_connection) is not None:
                 raise RuntimeError("Connection already registered.")
             if self._nickname_connections.get(nickname) is not None:
-                raise RuntimeError(f"Nickname already registered:{self._nickname_connections}")
+                raise RuntimeError(
+                    f"Nickname already registered:{self._nickname_connections}"
+                )
 
             self._connection_nicknames[client_connection] = nickname
             self._nickname_connections[nickname] = client_connection

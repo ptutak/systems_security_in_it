@@ -22,10 +22,11 @@ from .common import (
 )
 from .constants import HASHING_ALGORITHM
 from .exception import (
-    AuthenticationError, InvalidCommand,
+    AuthenticationError,
+    ConnectionError,
+    InvalidCommand,
     RegistrationError,
     ResponseAddressError,
-    ConnectionError,
 )
 
 
@@ -200,7 +201,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         self.request.sendall(response)
         self.LOGGER.error(f"ERROR: {self.client_address} {message}")
 
-    def handle_encrypted_error(self, client_request: ClientRequest, message: str) -> None:
+    def handle_encrypted_error(
+        self, client_request: ClientRequest, message: str
+    ) -> None:
         response = Request(Response.ERROR, Message(message))
         self.request.sendall(client_request.connection.encrypt(response))
         self.LOGGER.error(

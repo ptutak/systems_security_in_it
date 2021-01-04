@@ -27,6 +27,7 @@ class RegistrationError(Exception):
         Raised upon registration errors.
     """
 
+
 class ConnectionError(Exception):
     """
     Raised upon connection errors
