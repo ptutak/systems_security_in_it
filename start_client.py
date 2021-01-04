@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import logging
+
 from encrypted_comm.client import Client, Observer, ObserverCreator
 
 LOGGER = logging.getLogger(__name__)
@@ -42,19 +43,10 @@ def handle_command(client: Client, command: str):
     except Exception as e:
         LOGGER.exception(e)
 
+
 new_client.connect_to_server()
 
 while True:
     command = input("Command:")
     if command.startswith("%"):
         handle_command(new_client, command)
-
-result = new_client.register("New Nickname")
-print(result)
-user_list = new_client.get_user_list()
-
-print(user_list)
-
-result = new_client.connect_to_user("New Nickname")
-
-print(result)
