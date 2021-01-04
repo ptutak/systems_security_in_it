@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import logging
 import pickle
 import socketserver
@@ -26,15 +27,41 @@ from .exception import AuthenticationError
 LOGGER = logging.getLogger(__name__)
 
 
+class Observer(ABC):
+    @abstractmethod
+    def update(self, message: str) -> None:
+        """
+        Update observer with a state message
+        """
+
+
 class ClientConnection:
     def __init__(self, sym_key: bytes):
         self._cryption = Fernet(sym_key)
+        self._lock = threading.Lock()
+        self._observers: List[Observer] = list()
 
     def encrypt(self, data: object) -> bytes:
         return self._cryption.encrypt(pickle.dumps(data))
 
     def decrypt(self, message: bytes) -> object:
         return pickle.loads(self._cryption.decrypt(message))
+
+    def attach(self, observer: Observer) -> None:
+        with self._lock:
+            self._observers.append(observer)
+
+    def detach(self, observer: Observer) -> None:
+        with self._lock:
+            try:
+                self._observers.remove(observer)
+            except ValueError:
+                return
+
+    def notify(self, message: str) -> None:
+        with self._lock:
+            for observer in self._observers:
+                observer.update(message)
 
 
 class ClientConnections:
