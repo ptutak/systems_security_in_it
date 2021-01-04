@@ -36,8 +36,10 @@ class Command(Enum):
 
 class Response(Enum):
     CONNECTION_SUCCESS = "connection_success"
+    MESSAGE_SUCCESS = "message_success"
     CLIENT_NOT_REGISTERED = "client_not_registered"
     USER_NOT_REGISTERED = "user_not_registered"
+    USER_NOT_CONNECTED = "user_not_connected"
     NICKNAME_ALREADY_USED = "nickname_already_used"
     NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"

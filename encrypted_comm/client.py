@@ -1,8 +1,8 @@
-from abc import ABC, abstractmethod
 import logging
 import pickle
 import socketserver
 import threading
+from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
@@ -20,6 +20,7 @@ from .common import (
     Request,
     Response,
     RSACryption,
+    RSAEncryption,
 )
 from .constants import HASHING_ALGORITHM
 from .exception import AuthenticationError
@@ -132,6 +133,10 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
     def observer_creator(self) -> ObserverCreator:
         return self.server.observer_creator
 
+    @property
+    def client_connections(self) -> ClientConnections:
+        return self.server.client_connections
+
     def receive_request(self, request) -> Request:
         data_length, data = self.receive_data(request)
         return self.decrypt(data)
@@ -159,10 +164,38 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
         self.COMMANDS[command](request)
 
     def _connect_to_user(self, request: Request) -> None:
-        pass
+        chat_message = ChatMessage.from_message(request.message)
+        nickname = chat_message.sender
+        public_key, public_key_hash = pickle.loads(chat_message.message)
+        if HASHING_ALGORITHM(public_key).hexdigest() != public_key_hash:
+            raise AuthenticationError("Wrong public key hash.")
+        rsa_encryption = RSAEncryption.from_serialized_key(public_key)
+        sym_key = Fernet.generate_key()
+        sym_key_hash = HASHING_ALGORITHM(sym_key).hexdigest()
+        key_data = (sym_key, sym_key_hash)
+        key_data_bytes = pickle.dumps(key_data)
+        encrypted_key_data_bytes = rsa_encryption.encrypt(key_data_bytes)
+
+        request = Request(
+            Response.CONNECTION_SUCCESS,
+            ChatMessage(None, nickname, encrypted_key_data_bytes),
+        )
+        encrypted_request = self.encrypt(request)
+        self.request.sendall(encrypted_request)
+        new_connection = self.client_connections.new_connection(nickname, sym_key)
+        new_connection.attach(self.observer_creator.create())
 
     def _message(self, request: Request) -> None:
-        pass
+        chat_message = ChatMessage.from_message(request.message)
+        connection = self.client_connections.get_connection(chat_message.sender)
+        if connection is None:
+            response = Request(Response.USER_NOT_CONNECTED, Message.zero_message())
+            self.request.sendall(self.encrypt(response))
+            return
+        message = connection.decrypt(chat_message.message)
+        response = Request(Response.MESSAGE_SUCCESS, Message.zero_message())
+        self.request.sendall(self.encrypt(response))
+        connection.notify(message)
 
     COMMANDS = {
         Command.CONNECT_TO_USER: _connect_to_user,
@@ -304,4 +337,16 @@ class Client(EncryptingConnectionHandler):
         new_connection.attach(self._observer_creator.create())
 
     def send_message(self, nickname: str, message: str) -> bool:
-        request = Request(Command.MESSAGE, Message.from_data(Request()))
+        connection = self._communication_server.client_connections.get_connection(
+            nickname
+        )
+        if connection is None:
+            raise RuntimeError("No such user")
+        request = Request(
+            Command.MESSAGE, ChatMessage(None, nickname, connection.encrypt(message))
+        )
+        response = self.send_request(request)
+        if response.command_or_response != Response.MESSAGE_SUCCESS:
+            return False
+        connection.notify(message)
+        return True
