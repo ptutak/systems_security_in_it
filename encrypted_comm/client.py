@@ -234,6 +234,7 @@ class Client(EncryptingConnectionHandler):
         self._communication_server_thread = None
         self._server_cryption: Cryption = IdemCryption()
         self._observer_creator = observer_creator
+        self.initialize_communication_server()
 
     @property
     def communication_address(self) -> Tuple[str, int]:
@@ -243,7 +244,7 @@ class Client(EncryptingConnectionHandler):
     def cryption(self) -> Cryption:
         return self._server_cryption
 
-    def initiate_communication_server(self):
+    def initialize_communication_server(self) -> None:
         self._communication_server = CommunicationServer(
             ("localhost", 0),
             destination_server_address=self._server_address,
@@ -292,19 +293,14 @@ class Client(EncryptingConnectionHandler):
         )
         return request
 
-    def register(self, nickname: str) -> bool:
-        if self._communication_server is None:
-            self.initiate_communication_server()
+    def register(self, nickname: str) -> None:
         request = Request(
             Command.REGISTER,
             Message.from_data((self._communication_server.server_address, nickname)),
         )
         response = self.send_request(request)
-        if response.command_or_response == Response.NICKNAME_ALREADY_USED:
-            return False
-        elif response.command_or_response == Response.NICKNAME_REGISTRATION_SUCCESS:
-            return True
-        raise RuntimeError("Unexpected response")
+        if response.command_or_response != Response.NICKNAME_REGISTRATION_SUCCESS:
+            raise RuntimeError(f"Registration error: {response.command_or_response}")
 
     def get_user_list(self) -> List[str]:
         request = Request(Command.GET_USER_LIST, Message.zero_message())
@@ -314,7 +310,7 @@ class Client(EncryptingConnectionHandler):
         user_list = response.message.data
         return user_list
 
-    def connect_to_user(self, nickname: str) -> bool:
+    def connect_to_user(self, nickname: str) -> None:
         rsa_cryption = RSACryption()
         serialized_key = rsa_cryption.public_key_serialized
         data = (serialized_key, HASHING_ALGORITHM(serialized_key).hexdigest())
@@ -324,7 +320,7 @@ class Client(EncryptingConnectionHandler):
         )
         response = self.send_request(request)
         if response.command_or_response != Response.CONNECTION_SUCCESS:
-            raise RuntimeError("Connection failed")
+            raise RuntimeError(f"Connection failed: {response.command_or_response}")
         message = ChatMessage.from_message(response.message)
 
         symmetric_key, symmetric_key_hash = message.message
@@ -336,7 +332,7 @@ class Client(EncryptingConnectionHandler):
         )
         new_connection.attach(self._observer_creator.create())
 
-    def send_message(self, nickname: str, message: str) -> bool:
+    def send_message(self, nickname: str, message: str) -> None:
         connection = self._communication_server.client_connections.get_connection(
             nickname
         )
@@ -347,6 +343,7 @@ class Client(EncryptingConnectionHandler):
         )
         response = self.send_request(request)
         if response.command_or_response != Response.MESSAGE_SUCCESS:
-            return False
+            raise RuntimeError(
+                f"Sending message failed: {response.command_or_response}"
+            )
         connection.notify(message)
-        return True
