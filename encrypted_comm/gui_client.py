@@ -1,9 +1,8 @@
-import logging
 import datetime
+import logging
+import threading
 import tkinter as tk
 import tkinter.font as tkfont
-from threading import Thread
-from time import sleep
 from typing import List, Union
 
 from .client import Client, Observer, ObserverCreator
@@ -95,11 +94,14 @@ class ServerConnection(tk.Frame):
         self._y_scroll["command"] = self._list_box.yview
         self._list_box.grid(row=1, column=1)
 
-        self._list_updating_thread = Thread(target=self._list_update)
+        self._list_updating_flag = threading.Event()
+        self._list_updating_flag.clear()
+        self._list_updating_thread = threading.Thread(target=self._list_update)
         self._list_updating_thread.daemon = True
         self._list_updating_thread.start()
 
     def _close_connection(self):
+        self._list_updating_flag.set()
         self._client.close_connection()
         self._master.destroy()
 
@@ -116,14 +118,19 @@ class ServerConnection(tk.Frame):
             LOGGER.error(f"Registration error: {e}")
 
     def _list_update(self):
-        while True:
+        while not self._list_updating_flag.is_set():
             if not self.winfo_exists():
                 return
             self._update_user_list()
-            sleep(CLIENT_REFRESH_TIME)
+            self._list_updating_flag.wait(CLIENT_REFRESH_TIME)
 
     def _update_user_list(self):
-        user_list = self._client.get_user_list()
+        try:
+            user_list = self._client.get_user_list()
+        except Exception as e:
+            PopupWindow("User list retrieval error", str(e))
+            self._close_connection()
+            return
         selected = self._list_box.curselection()
         selected_names = list(self._list_box.get(selection) for selection in selected)
         activated = None
@@ -142,7 +149,10 @@ class ServerConnection(tk.Frame):
         )
 
         for user in selected_user_names:
-            self._client.connect_to_user(user)
+            try:
+                self._client.connect_to_user(user)
+            except Exception as e:
+                PopupWindow("Connection error", str(e))
 
 
 class ChatWindow(tk.Frame, Observer):
@@ -200,7 +210,10 @@ class ChatWindow(tk.Frame, Observer):
         message = self._chat_entry_variable.get()
         stripped_message = message.strip()
         if stripped_message:
-            self._client.send_message(self._chat_with, stripped_message)
+            try:
+                self._client.send_message(self._chat_with, stripped_message)
+            except Exception as e:
+                PopupWindow("Sending message error", str(e))
         self._chat_entry_variable.set("")
 
     def _close_connection(self):

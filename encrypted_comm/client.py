@@ -392,6 +392,8 @@ class Client(EncryptingConnectionHandler):
         return user_list
 
     def connect_to_user(self, nickname: str) -> None:
+        if nickname == self._nickname:
+            raise RuntimeError("Cannot connect to self")
         rsa_cryption = RSACryption()
         serialized_key = rsa_cryption.public_key_serialized
         data = (serialized_key, HASHING_ALGORITHM(serialized_key).hexdigest())
