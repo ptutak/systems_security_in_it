@@ -294,10 +294,13 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
 
     def _communicate_command(self, client_request: ClientRequest) -> None:
         chat_message = ChatMessage.from_message(client_request.request.message)
-        receiver_connection = self.user_storage.get_connection(chat_message.receiver)
+        receiver = chat_message.receiver
+        receiver_connection = self.user_storage.get_connection(receiver)
         if receiver_connection is None:
             encrypted_error_message = client_request.connection.encrypt(
-                Request(Response.USER_NOT_REGISTERED, Message("No such user"))
+                Request(
+                    Response.USER_NOT_REGISTERED, Message(f"No such user {receiver}")
+                )
             )
             self.request.sendall(encrypted_error_message)
             return

@@ -1,5 +1,4 @@
 import logging
-from .constants import CLIENT_REFRESH_TIME
 import tkinter as tk
 import tkinter.font as tkfont
 from threading import Thread
@@ -8,6 +7,7 @@ from tkinter import ttk
 from typing import List, Union
 
 from .client import Client, Observer, ObserverCreator
+from .constants import CLIENT_REFRESH_TIME
 
 LOGGER = logging.getLogger(__name__)
 
@@ -120,9 +120,7 @@ class ServerConnection(tk.Frame):
     def _update_user_list(self):
         user_list = self._client.get_user_list()
         selected = self._list_box.curselection()
-        selected_names = list(
-            self._list_box.get(selection) for selection in selected
-        )
+        selected_names = list(self._list_box.get(selection) for selection in selected)
         activated = None
         for user in selected_names:
             if user in user_list:
