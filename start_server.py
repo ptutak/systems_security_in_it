@@ -1,9 +1,9 @@
 from encrypted_comm.server import EncryptionMessageServer
 
+ADDRESS = ("127.0.0.1", 7000)
+
 EncryptionMessageServer.allow_reuse_address = True
 
-address = ("127.0.0.1", 7000)
-
-with EncryptionMessageServer(address) as server:
-    print(f"Starting server at {address} ...")
+print(f"Starting server at {ADDRESS} ...")
+with EncryptionMessageServer(ADDRESS) as server:
     server.serve_forever()
