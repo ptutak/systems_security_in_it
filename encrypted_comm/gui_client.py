@@ -138,8 +138,7 @@ class ServerConnection(tk.Frame):
     def _connect_to_users(self):
         selected_users = self._list_box.curselection()
         selected_user_names = list(
-            self._list_box.get(selection)
-            for selection in selected_users
+            self._list_box.get(selection) for selection in selected_users
         )
 
         for user in selected_user_names:
