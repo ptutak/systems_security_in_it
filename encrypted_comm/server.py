@@ -1,8 +1,9 @@
 import logging
 import socketserver
 import threading
+import time
 import uuid
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
 
@@ -20,7 +21,7 @@ from .common import (
     Response,
     RSAEncryption,
 )
-from .constants import HASHING_ALGORITHM
+from .constants import CLIENT_IDLE_TIME, HASHING_ALGORITHM
 from .exception import (
     AuthenticationError,
     ConnectionError,
@@ -60,6 +61,14 @@ class ClientConnection(EncryptingConnectionHandler):
         self._public_key_cryption: AsymmetricEncryption = AsymmetricEncryption(
             client_uuid, secret_uuid, encryption
         )
+
+        self._update_time = time.time()
+
+    def is_active(self):
+        return time.time() - self._update_time < CLIENT_IDLE_TIME
+
+    def update(self):
+        self._update_time = time.time()
 
     @property
     def cryption(self):
@@ -108,6 +117,7 @@ class ClientStorage:
                 return ClientRequest(
                     Request(Command.CONNECT, Message.zero_message()), new_connection,
                 )
+            connection.update()
             return ClientRequest(connection.decrypt(message), connection)
 
     def _create_client(self, message: bytes) -> ClientConnection:
@@ -122,6 +132,22 @@ class ClientStorage:
     def match_client(self, message: bytes) -> Optional[ClientConnection]:
         return self._clients.get(message[0:16])
 
+    def get_clients(self) -> List[ClientConnection]:
+        return list(self._clients.values())
+
+    def discard_client(self, client: ClientConnection):
+        uuid = client.cryption.uuid.bytes
+        with self._clients_lock:
+            if uuid in self._clients:
+                del self._clients[uuid]
+
+    def discard_clients(self, clients: List[ClientConnection]):
+        with self._clients_lock:
+            for client in clients:
+                uuid = client.cryption.uuid.bytes
+                if uuid in self._clients:
+                    del self._clients[uuid]
+
 
 class UserStorage:
     def __init__(self):
@@ -130,13 +156,24 @@ class UserStorage:
         self._connection_nicknames: Dict[ClientConnection, str] = {}
 
     def get_connection(self, nickname: str) -> Optional[ClientConnection]:
-        return self._nickname_connections.get(nickname, None)
+        connection = self._nickname_connections.get(nickname, None)
+        if connection is not None:
+            if connection.is_active():
+                connection.update()
+        return connection
 
     def get_nickname(self, connection: ClientConnection) -> Optional[str]:
-        return self._connection_nicknames.get(connection, None)
+        nickname = self._connection_nicknames.get(connection, None)
+        if nickname is not None:
+            if connection.is_active():
+                connection.update()
+        return nickname
 
     def get_user_list(self) -> List[str]:
         return list(self._nickname_connections.keys())
+
+    def get_clients(self) -> List[ClientConnection]:
+        return list(self._connection_nicknames.keys())
 
     def register(self, nickname: str, client_connection: ClientConnection) -> None:
         with self._lock:
@@ -150,10 +187,18 @@ class UserStorage:
 
     def deregister_connection(self, client_connection: ClientConnection) -> None:
         with self._lock:
-            if client_connection in self._connection_nicknames:
-                nickname = self._connection_nicknames[client_connection]
-                del self._connection_nicknames[client_connection]
-                del self._nickname_connections[nickname]
+            self._delete_connection(client_connection)
+
+    def deregister_connections(self, connections: List[ClientConnection]) -> None:
+        with self._lock:
+            for connection in connections:
+                self._delete_connection(connection)
+
+    def _delete_connection(self, connection: ClientConnection) -> None:
+        if connection in self._connection_nicknames:
+            nickname = self._connection_nicknames[connection]
+            del self._connection_nicknames[connection]
+            del self._nickname_connections[nickname]
 
     def deregister_nickname(self, nickname: str) -> None:
         with self._lock:
@@ -182,6 +227,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         heading, data = self.receive_data(self.request)
         try:
             client_request: ClientRequest = self.client_storage.get_client_request(data)
+
         except Exception as e:
             self.handle_error(f"{e}")
             return
@@ -220,9 +266,6 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
 
     def _register_command(self, client_request: ClientRequest) -> None:
         client_response_address, client_nickname = client_request.request.message.data
-        host = self.client_address[0]
-        port = client_response_address[1]
-        client_request.connection.communication_address = (host, port)
 
         try:
             self.server.user_storage.register(
@@ -236,6 +279,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
             encrypted_message = client_request.connection.encrypt(
                 Request(Response.NICKNAME_REGISTRATION_SUCCESS, Message.zero_message())
             )
+            host = self.client_address[0]
+            port = client_response_address[1]
+            client_request.connection.communication_address = (host, port)
 
         self.request.sendall(encrypted_message)
 
@@ -272,6 +318,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         encrypted_response = client_request.connection.encrypt(response)
         self.request.sendall(encrypted_response)
 
+    def _ping_command(self, client_request: ClientRequest) -> None:
+        client_request.connection.update()
+
     def finish(self):
         pass
 
@@ -281,7 +330,30 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         Command.MESSAGE: _communicate_command,
         Command.GET_USER_LIST: _get_user_list_command,
         Command.REGISTER: _register_command,
+        Command.PING: _ping_command,
     }
+
+
+class ClientConnectionsCleaner:
+    def __init__(
+        self,
+        client_storage: ClientStorage,
+        user_storage: UserStorage,
+        time_interval: int,
+    ) -> None:
+        self._client_storage = client_storage
+        self._user_storage = user_storage
+        self._interval = time_interval
+
+    def run(self):
+        while True:
+            clients = self._client_storage.get_clients()
+            offline_clients = list(
+                client for client in clients if not client.is_active()
+            )
+            self._user_storage.deregister_connections(offline_clients)
+            self._client_storage.discard_clients(offline_clients)
+            time.sleep(self._interval)
 
 
 class EncryptionMessageServer(socketserver.ThreadingTCPServer):
@@ -291,3 +363,9 @@ class EncryptionMessageServer(socketserver.ThreadingTCPServer):
         super().__init__(server_address, handler_class)
         self.client_storage = ClientStorage()
         self.user_storage = UserStorage()
+        self.client_cleaner = ClientConnectionsCleaner(
+            self.client_storage, self.user_storage, CLIENT_IDLE_TIME
+        )
+        client_cleaner_thread = threading.Thread(target=self.client_cleaner.run)
+        client_cleaner_thread.daemon = True
+        client_cleaner_thread.start()

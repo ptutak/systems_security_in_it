@@ -31,7 +31,7 @@ class Command(Enum):
     MESSAGE = "message"
     CONNECT_TO_USER = "connect_to_user"
     GET_USER_LIST = "get_user_list"
-    RESET = "reset"
+    PING = "ping"
 
 
 class Response(Enum):
@@ -66,6 +66,9 @@ class Message:
     @classmethod
     def zero_message(cls):
         return cls.from_data(tuple())
+
+    def __repr__(self) -> str:
+        return f"Message({self.data})"
 
 
 class ChatMessage(Message):

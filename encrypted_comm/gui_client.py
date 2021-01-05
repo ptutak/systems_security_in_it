@@ -1,4 +1,5 @@
 import logging
+from .constants import CLIENT_REFRESH_TIME
 import tkinter as tk
 import tkinter.font as tkfont
 from threading import Thread
@@ -114,20 +115,20 @@ class ServerConnection(tk.Frame):
             if not self.winfo_exists():
                 return
             self._update_user_list()
-            sleep(8)
+            sleep(CLIENT_REFRESH_TIME)
 
     def _update_user_list(self):
         user_list = self._client.get_user_list()
         selected = self._list_box.curselection()
         selected_names = list(
-            item for selection in selected for item in self._list_box.get(selection)
+            self._list_box.get(selection) for selection in selected
         )
         activated = None
         for user in selected_names:
             if user in user_list:
                 activated = user_list.index(user)
-        self._list_box.delete(0, "end")
-        self._list_box.insert(0, user_list)
+        self._list_box.delete(0, tk.END)
+        self._list_box.insert(0, *user_list)
         if activated is not None:
             self._list_box.selection_set(activated)
 

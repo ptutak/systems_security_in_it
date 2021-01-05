@@ -1,8 +1,10 @@
 import logging
 import pickle
+import socket
 import socketserver
 import threading
 from abc import ABC, abstractmethod
+from time import sleep
 from typing import Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
@@ -22,7 +24,7 @@ from .common import (
     RSACryption,
     RSAEncryption,
 )
-from .constants import HASHING_ALGORITHM
+from .constants import CLIENT_REFRESH_TIME, HASHING_ALGORITHM
 from .exception import AuthenticationError
 
 LOGGER = logging.getLogger(__name__)
@@ -224,6 +226,27 @@ class CommunicationServer(socketserver.ThreadingTCPServer):
         self.observer_creator = observer_creator
 
 
+class ConnectionPinger:
+    def __init__(
+        self, bytes_request: bytes, server_address: Tuple[str, int], time_interval: int
+    ) -> None:
+        self._request = bytes_request
+        self._server_address = server_address
+        self._interval = time_interval
+        self._flag = threading.Event()
+        self._flag.clear()
+
+    def run(self):
+        while not self._flag.is_set():
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                connection.connect(self._server_address)
+                connection.sendall(self._request)
+            self._flag.wait(self._interval)
+
+    def close(self):
+        self._flag.set()
+
+
 class Client(EncryptingConnectionHandler):
     ZERO_CRYPTION = IdemCryption()
 
@@ -239,6 +262,8 @@ class Client(EncryptingConnectionHandler):
         self._communication_server_thread = None
         self._server_cryption: Cryption = IdemCryption()
         self._observer_creator = observer_creator
+        self._pinger: Optional[ConnectionPinger] = None
+        self._pinger_thread = None
         self.initialize_communication_server()
 
     @property
@@ -249,10 +274,27 @@ class Client(EncryptingConnectionHandler):
     def cryption(self) -> Cryption:
         return self._server_cryption
 
+    def initialize_pinger(self) -> None:
+        request = Request(Command.PING, Message.zero_message())
+        pinger_request = self.encrypt(request)
+        self._pinger = ConnectionPinger(
+            pinger_request, self.communication_address, CLIENT_REFRESH_TIME
+        )
+        self._pinger_thread = threading.Thread(target=self._pinger.run)
+        self._pinger_thread.daemon = True
+        self._pinger_thread.start()
+
+    def close_pinger(self):
+        self._pinger.close()
+
+    def __del__(self):
+        if self._pinger is not None:
+            self._pinger.close()
+
     def initialize_communication_server(self) -> None:
         self._communication_server = CommunicationServer(
             ("localhost", 0),
-            destination_server_address=self._server_address,
+            destination_server_address=self.communication_address,
             observer_creator=self._observer_creator,
             handler_class=CommunicationHandler,
         )
@@ -278,7 +320,9 @@ class Client(EncryptingConnectionHandler):
         )
 
         if request.command_or_response != Response.CONNECTION_SUCCESS:
-            raise RuntimeError("Connection failed")
+            raise RuntimeError(
+                f"Connection failed {request.command_or_response} {request.message}"
+            )
 
         uuid = self._private_key_decryption.uuid
         secret_uuid = self._private_key_decryption.secret_uuid
@@ -289,6 +333,7 @@ class Client(EncryptingConnectionHandler):
 
         self._server_cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
         self._communication_server.server_cryption = self._server_cryption
+        self.initialize_pinger()
 
     def _prepare_unencrypted_public_key_request(self) -> Request:
         serialized_public_key = self._server_rsa_cryption.public_key_serialized
@@ -305,7 +350,9 @@ class Client(EncryptingConnectionHandler):
         )
         response = self.send_request(request)
         if response.command_or_response != Response.NICKNAME_REGISTRATION_SUCCESS:
-            raise RuntimeError(f"Registration error: {response.command_or_response}")
+            raise RuntimeError(
+                f"Registration error: {response.command_or_response} {response.message}"
+            )
 
     def get_user_list(self) -> List[str]:
         request = Request(Command.GET_USER_LIST, Message.zero_message())
@@ -325,7 +372,9 @@ class Client(EncryptingConnectionHandler):
         )
         response = self.send_request(request)
         if response.command_or_response != Response.CONNECTION_SUCCESS:
-            raise RuntimeError(f"Connection failed: {response.command_or_response}")
+            raise RuntimeError(
+                f"Connection failed: {response.command_or_response} {response.message}"
+            )
         message = ChatMessage.from_message(response.message)
 
         decrypted_message = rsa_cryption.decrypt(message.message)
@@ -343,14 +392,16 @@ class Client(EncryptingConnectionHandler):
         connection = self._communication_server.client_connections.get_connection(
             nickname
         )
+
         if connection is None:
             raise RuntimeError("No such user")
+
         request = Request(
             Command.MESSAGE, ChatMessage(None, nickname, connection.encrypt(message))
         )
         response = self.send_request(request)
         if response.command_or_response != Response.MESSAGE_SUCCESS:
             raise RuntimeError(
-                f"Sending message failed: {response.command_or_response}"
+                f"Sending message failed: {response.command_or_response} {response.message}"
             )
         connection.notify(message)
