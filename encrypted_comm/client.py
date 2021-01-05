@@ -284,12 +284,12 @@ class Client(EncryptingConnectionHandler):
         self._pinger_thread.daemon = True
         self._pinger_thread.start()
 
-    def close_pinger(self):
-        self._pinger.close()
-
-    def __del__(self):
+    def close_connection(self):
         if self._pinger is not None:
             self._pinger.close()
+
+    def __del__(self):
+        self.close_connection()
 
     def initialize_communication_server(self) -> None:
         self._communication_server = CommunicationServer(

@@ -64,12 +64,13 @@ class ServerConnection(tk.Frame):
         self.grid(row=0, column=0)
         self._master = master
         self._client = client
+        master.protocol("WM_DELETE_WINDOW", self._close_connection)
         try:
             self._client.connect_to_server()
         except Exception as e:
             PopupWindow("Connection Error", f"Error when connecting to server: {e}")
             LOGGER.error(f"Error when connecting to server: {e}")
-            master.destroy()
+            self._close_connection()
             return
 
         self._connect_to_user_button = tk.Button(
@@ -97,6 +98,10 @@ class ServerConnection(tk.Frame):
         self._list_updating_thread = Thread(target=self._list_update)
         self._list_updating_thread.daemon = True
         self._list_updating_thread.start()
+
+    def _close_connection(self):
+        self._client.close_connection()
+        self._master.destroy()
 
     def _register(self):
         value = self._register_entry.value
@@ -133,9 +138,8 @@ class ServerConnection(tk.Frame):
     def _connect_to_users(self):
         selected_users = self._list_box.curselection()
         selected_user_names = list(
-            item
+            self._list_box.get(selection)
             for selection in selected_users
-            for item in self._list_box.get(selection)
         )
 
         for user in selected_user_names:
