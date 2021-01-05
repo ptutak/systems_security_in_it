@@ -104,6 +104,7 @@ class ServerConnection(tk.Frame):
             return
         try:
             self._client.register(value.strip())
+            self._update_user_list()
         except Exception as e:
             PopupWindow("Registration error", f"{e}")
             LOGGER.error(f"Registration error: {e}")
@@ -112,20 +113,34 @@ class ServerConnection(tk.Frame):
         while True:
             if not self.winfo_exists():
                 return
-            user_list = self._client.get_user_list()
-            selected = self._list_box.curselection()
-            self._list_box.delete(0, "end")
-            activated = None
-            for user in selected:
-                if user in user_list:
-                    activated = user_list.index(user)
-            self._list_box.insert(0, user_list)
-            if activated is not None:
-                self._list_box.activate(activated)
+            self._update_user_list()
             sleep(8)
+
+    def _update_user_list(self):
+        user_list = self._client.get_user_list()
+        selected = self._list_box.curselection()
+        selected_names = list(
+            item for selection in selected for item in self._list_box.get(selection)
+        )
+        activated = None
+        for user in selected_names:
+            if user in user_list:
+                activated = user_list.index(user)
+        self._list_box.delete(0, "end")
+        self._list_box.insert(0, user_list)
+        if activated is not None:
+            self._list_box.selection_set(activated)
 
     def _connect_to_users(self):
         selected_users = self._list_box.curselection()
+        selected_user_names = list(
+            item
+            for selection in selected_users
+            for item in self._list_box.get(selection)
+        )
+
+        for user in selected_user_names:
+            self._client.connect_to_user(user)
 
 
 class ChatWindow(tk.Frame, Observer):
