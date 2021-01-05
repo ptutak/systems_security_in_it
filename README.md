@@ -1,4 +1,19 @@
-## systems_security_in_it
+# Usage
+
+To start using the server:
+
+```bash
+python3 ./start_server.py
+```
+
+
+To start using the client:
+```
+python3 ./start_gui_client.py
+```
+
+
+# Message payloads
 
 
 Message payload:
@@ -35,7 +50,7 @@ Pickled: (Destination Nickname, Client-Encrypted Data)
 Server to Client Data:
 [Length Heading][User UUID, Client-Encryption Payload]
 
-Client-Encryption Payload
+Client-Encryption Payload:
 [User Secret UUID, Pickled: (Command.MESSAGE, Client-Communication Data)]
 
 Client-Communication Data:
