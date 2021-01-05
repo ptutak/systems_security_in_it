@@ -1,6 +1,5 @@
 #!/usr/bin/python
 import tkinter as tk
-import tkinter.font as tkFont
 
 from encrypted_comm.gui_client import GuiClient, set_default_font_size
 

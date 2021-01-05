@@ -3,7 +3,7 @@ import socketserver
 import threading
 import time
 import uuid
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet
 

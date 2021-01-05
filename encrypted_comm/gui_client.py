@@ -3,7 +3,6 @@ import tkinter as tk
 import tkinter.font as tkfont
 from threading import Thread
 from time import sleep
-from tkinter import ttk
 from typing import List, Union
 
 from .client import Client, Observer, ObserverCreator
