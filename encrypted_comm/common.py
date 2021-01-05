@@ -30,19 +30,23 @@ class Command(Enum):
     REGISTER = "register"
     MESSAGE = "message"
     CONNECT_TO_USER = "connect_to_user"
+    DISCONNECT_USER = "disconnect_user"
     GET_USER_LIST = "get_user_list"
     PING = "ping"
 
 
 class Response(Enum):
+    USER_LIST = "user_list"
+
     CONNECTION_SUCCESS = "connection_success"
+    NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     MESSAGE_SUCCESS = "message_success"
+    DISCONNECTION_SUCCESS = "disconnection_success"
+
     CLIENT_NOT_REGISTERED = "client_not_registered"
     USER_NOT_REGISTERED = "user_not_registered"
     USER_NOT_CONNECTED = "user_not_connected"
     REGISTRATION_ERROR = "registration_error"
-    NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
-    USER_LIST = "user_list"
     WRONG_COMMAND = "wrong_command"
     ERROR = "error"
 

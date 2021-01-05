@@ -331,6 +331,7 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
         Command.CONNECT: _connect_command,
         Command.CONNECT_TO_USER: _communicate_command,
         Command.MESSAGE: _communicate_command,
+        Command.DISCONNECT_USER: _communicate_command,
         Command.GET_USER_LIST: _get_user_list_command,
         Command.REGISTER: _register_command,
         Command.PING: _ping_command,

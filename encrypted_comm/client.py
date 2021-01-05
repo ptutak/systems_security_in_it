@@ -36,31 +36,41 @@ class Observer(ABC):
         Update observer with a state message
         """
 
+    @abstractmethod
+    def close(self) -> None:
+        """
+        Closes the connection
+        """
+
 
 class ObserverCreator(ABC):
     @abstractmethod
-    def create(self) -> Observer:
+    def create(self, nickname: str) -> Observer:
         """
         Creates an observer
         """
 
 
 class ClientConnection:
-    def __init__(self, nickname: str, sym_key: bytes):
-        self._nickname = nickname
+    def __init__(self, sym_key: bytes):
         self._cryption = Fernet(sym_key)
         self._lock = threading.Lock()
         self._observers: List[Observer] = list()
-
-    @property
-    def nickname(self) -> str:
-        return self._nickname
 
     def encrypt(self, data: object) -> bytes:
         return self._cryption.encrypt(pickle.dumps(data))
 
     def decrypt(self, message: bytes) -> object:
         return pickle.loads(self._cryption.decrypt(message))
+
+    def close(self) -> None:
+        with self._lock:
+            for observer in self._observers:
+                observer.close()
+        self._observers.clear()
+
+    def __del__(self):
+        self.close()
 
     def attach(self, observer: Observer) -> None:
         with self._lock:
@@ -73,10 +83,10 @@ class ClientConnection:
             except ValueError:
                 return
 
-    def notify(self, message: str) -> None:
+    def notify(self, nickname: str, message: str) -> None:
         with self._lock:
             for observer in self._observers:
-                observer.update(self._nickname, message)
+                observer.update(nickname, message)
 
 
 class ClientConnections:
@@ -95,12 +105,11 @@ class ClientConnections:
         return list(self._nickname_connections.keys())
 
     def new_connection(self, nickname: str, sym_key: bytes) -> ClientConnection:
-        connection = ClientConnection(nickname, sym_key)
-        self.register(connection)
+        connection = ClientConnection(sym_key)
+        self.register(nickname, connection)
         return connection
 
-    def register(self, client_connection: ClientConnection) -> None:
-        nickname = client_connection.nickname
+    def register(self, nickname: str, client_connection: ClientConnection) -> None:
         with self._lock:
             if self._connection_nicknames.get(client_connection) is not None:
                 raise RuntimeError("Connection already registered.")
@@ -118,6 +127,7 @@ class ClientConnections:
                 nickname = self._connection_nicknames[client_connection]
                 del self._connection_nicknames[client_connection]
                 del self._nickname_connections[nickname]
+                client_connection.close()
 
     def deregister_nickname(self, nickname: str) -> None:
         with self._lock:
@@ -125,6 +135,7 @@ class ClientConnections:
                 connection = self._nickname_connections[nickname]
                 del self._nickname_connections[nickname]
                 del self._connection_nicknames[connection]
+                connection.close()
 
 
 class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
@@ -189,11 +200,12 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
         encrypted_request = self.encrypt(request)
         self.request.sendall(encrypted_request)
         new_connection = self.client_connections.new_connection(nickname, sym_key)
-        new_connection.attach(self.observer_creator.create())
+        new_connection.attach(self.observer_creator.create(nickname))
 
     def _message(self, request: Request) -> None:
         chat_message = ChatMessage.from_message(request.message)
-        connection = self.client_connections.get_connection(chat_message.sender)
+        sender = chat_message.sender
+        connection = self.client_connections.get_connection(sender)
         if connection is None:
             response = Request(Response.USER_NOT_CONNECTED, Message.zero_message())
             self.request.sendall(self.encrypt(response))
@@ -201,11 +213,24 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
         message = connection.decrypt(chat_message.message)
         response = Request(Response.MESSAGE_SUCCESS, Message.zero_message())
         self.request.sendall(self.encrypt(response))
-        connection.notify(message)
+        connection.notify(sender, message)
+
+    def _disconnect_user(self, request: Request) -> None:
+        chat_message = ChatMessage.from_message(request.message)
+        connection = self.client_connections.get_connection(chat_message.sender)
+        if connection is None:
+            response = Request(Response.USER_NOT_CONNECTED, Message.zero_message())
+            self.request.sendall(self.encrypt(response))
+            return
+
+        response = Request(Response.DISCONNECTION_SUCCESS, Message.zero_message())
+        self.client_connections.deregister_connection(connection)
+        self.request.sendall(self.encrypt(response))
 
     COMMANDS = {
         Command.CONNECT_TO_USER: _connect_to_user,
         Command.MESSAGE: _message,
+        Command.DISCONNECT_USER: _disconnect_user,
     }
 
 
@@ -263,6 +288,7 @@ class Client(EncryptingConnectionHandler):
         self._observer_creator = observer_creator
         self._pinger: Optional[ConnectionPinger] = None
         self._pinger_thread = None
+        self._nickname = None
         self.initialize_communication_server()
 
     @property
@@ -286,6 +312,8 @@ class Client(EncryptingConnectionHandler):
     def close_connection(self):
         if self._pinger is not None:
             self._pinger.close()
+        if self._communication_server is not None:
+            self._communication_server.shutdown()
 
     def __del__(self):
         self.close_connection()
@@ -332,6 +360,8 @@ class Client(EncryptingConnectionHandler):
 
         self._server_cryption = FernetCryption(uuid, secret_uuid, symmetric_key)
         self._communication_server.server_cryption = self._server_cryption
+        if self._pinger is not None:
+            self._pinger.close()
         self.initialize_pinger()
 
     def _prepare_unencrypted_public_key_request(self) -> Request:
@@ -352,6 +382,7 @@ class Client(EncryptingConnectionHandler):
             raise RuntimeError(
                 f"Registration error: {response.command_or_response} {response.message}"
             )
+        self._nickname = nickname
 
     def get_user_list(self) -> List[str]:
         request = Request(Command.GET_USER_LIST, Message.zero_message())
@@ -385,7 +416,38 @@ class Client(EncryptingConnectionHandler):
         new_connection = self._communication_server.client_connections.new_connection(
             nickname, symmetric_key
         )
-        new_connection.attach(self._observer_creator.create())
+        new_connection.attach(self._observer_creator.create(nickname))
+
+    def disconnect_user(self, nickname: str):
+        connection = self._communication_server.client_connections.get_connection(
+            nickname
+        )
+
+        if connection is None:
+            return
+
+        request = Request(
+            Command.DISCONNECT_USER, ChatMessage(None, nickname, connection.encrypt(""))
+        )
+        response = self.send_request(request)
+
+        if response.command_or_response != Response.DISCONNECTION_SUCCESS:
+            raise RuntimeError(
+                f"Disconnection failed {response.command_or_response} {response.message}"
+            )
+
+        print("Disconnection success")
+        self._communication_server.client_connections.deregister_connection(connection)
+
+    def remove_user(self, nickname: str):
+        connection = self._communication_server.client_connections.get_connection(
+            nickname
+        )
+
+        if connection is None:
+            return
+
+        self._communication_server.client_connections.deregister_connection(connection)
 
     def send_message(self, nickname: str, message: str) -> None:
         connection = self._communication_server.client_connections.get_connection(
@@ -393,7 +455,7 @@ class Client(EncryptingConnectionHandler):
         )
 
         if connection is None:
-            raise RuntimeError("No such user")
+            raise RuntimeError(f"No such user {nickname}")
 
         request = Request(
             Command.MESSAGE, ChatMessage(None, nickname, connection.encrypt(message))
@@ -403,4 +465,4 @@ class Client(EncryptingConnectionHandler):
             raise RuntimeError(
                 f"Sending message failed: {response.command_or_response} {response.message}"
             )
-        connection.notify(message)
+        connection.notify(self._nickname, message)

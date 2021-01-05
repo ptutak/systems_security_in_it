@@ -1,4 +1,5 @@
 import logging
+import datetime
 import tkinter as tk
 import tkinter.font as tkfont
 from threading import Thread
@@ -145,33 +146,75 @@ class ServerConnection(tk.Frame):
 
 
 class ChatWindow(tk.Frame, Observer):
-    def __init__(self, master):
+    def __init__(self, master, client: Client, nickname: str):
         super().__init__(master)
+        self._client = client
+        self._chat_with = nickname
+        self.winfo_toplevel().title(f"Chat with: {nickname}")
         position_right = int(self.winfo_screenwidth() / 2)
         position_down = int(self.winfo_screenheight() / 2)
         master.geometry(f"+{position_right}+{position_down}")
         self.grid(row=0, column=0)
         self._master = master
+        master.protocol("WM_DELETE_WINDOW", self._close_connection)
 
         self._label = tk.Label(self, text="Chat Window")
         self._label.grid(row=0, column=0)
 
+        self._y_scroll = tk.Scrollbar(self, orient=tk.VERTICAL)
+        self._y_scroll.grid(row=1, column=1, sticky=tk.N + tk.S)
+
+        self._chat = tk.StringVar()
+        self._chat_box = tk.Listbox(
+            self, yscrollcommand=self._y_scroll.set, listvariable=self._chat,
+        )
+        self._y_scroll["command"] = self._chat_box.yview
+        self._chat_box.grid(row=1, column=0)
+
+        self._chat_entry_variable = tk.StringVar()
+        self._chat_entry = tk.Entry(self, textvariable=self._chat_entry_variable)
+        self._chat_entry.grid(row=2, column=0, sticky=tk.W + tk.E)
+
+        self._send_button = tk.Button(self, text="Send", command=self._send_message)
+        self._send_button.grid(row=2, column=1)
+
     def update(self, nickname: str, message: str) -> None:
-        pass
+        now = datetime.datetime.now()
+        self._chat_box.insert(tk.END, f"# {nickname} {now}:", message)
+
+    def close(self) -> None:
+        self._master.destroy()
+
+    def _send_message(self) -> None:
+        message = self._chat_entry_variable.get()
+        stripped_message = message.strip()
+        if stripped_message:
+            self._client.send_message(self._chat_with, stripped_message)
+        self._chat_entry_variable.set("")
+
+    def _close_connection(self):
+        try:
+            self._client.disconnect_user(self._chat_with)
+        except Exception as e:
+            self._client.remove_user(self._chat_with)
 
 
 class ChatWindowCreator(ObserverCreator):
     def __init__(self, master):
         self._master = master
+        self._client = None
 
-    def create(self) -> Observer:
+    @property
+    def client(self) -> Client:
+        return self._client
+
+    @client.setter
+    def client(self, client: Client):
+        self._client = client
+
+    def create(self, nickname: str) -> Observer:
         new_window = tk.Toplevel(self._master)
-        return ChatWindow(new_window)
-
-
-class Mock:
-    def __init__(self, comm_address):
-        self.communication_address = comm_address
+        return ChatWindow(new_window, self.client, nickname)
 
 
 class GuiClient(tk.Frame):
@@ -200,5 +243,7 @@ class GuiClient(tk.Frame):
         server_address = self._address_entry.value
         port = self._port_entry.value
         new_window = tk.Toplevel(self._master)
-        client = Client((server_address, port), ChatWindowCreator(self))
+        creator = ChatWindowCreator(self)
+        client = Client((server_address, port), creator)
+        creator.client = client
         ServerConnection(new_window, client)
