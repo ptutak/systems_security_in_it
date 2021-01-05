@@ -40,7 +40,7 @@ class Response(Enum):
     CLIENT_NOT_REGISTERED = "client_not_registered"
     USER_NOT_REGISTERED = "user_not_registered"
     USER_NOT_CONNECTED = "user_not_connected"
-    NICKNAME_ALREADY_USED = "nickname_already_used"
+    REGISTRATION_ERROR = "registration_error"
     NICKNAME_REGISTRATION_SUCCESS = "nickname_registration_success"
     USER_LIST = "user_list"
     WRONG_COMMAND = "wrong_command"

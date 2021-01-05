@@ -1,9 +1,14 @@
+import logging
 import tkinter as tk
 import tkinter.font as tkfont
+from threading import Thread
+from time import sleep
 from tkinter import ttk
-from typing import Any, Optional, Union, List
+from typing import List, Union
 
 from .client import Client, Observer, ObserverCreator
+
+LOGGER = logging.getLogger(__name__)
 
 
 def set_default_font_size(fonts: List[str], size: int):
@@ -33,16 +38,134 @@ class EntryWithLabel(tk.Frame):
         return self._variable.get()
 
 
+class PopupWindow(tk.Frame):
+    def __init__(self, title: str, text: str):
+        new_window = tk.Toplevel()
+        super().__init__(new_window)
+        position_right = int(self.winfo_screenwidth() / 2)
+        position_down = int(self.winfo_screenheight() / 2)
+        new_window.geometry(f"+{position_right}+{position_down}")
+        self.pack()
+        self.winfo_toplevel().title(title)
+        self._label = tk.Label(self, text=text)
+        self._label.pack()
+        self._ok_button = tk.Button(self, text="Ok", command=new_window.destroy)
+        self._ok_button.pack()
+
+
 class ServerConnection(tk.Frame):
     def __init__(self, master, client: Client):
         super().__init__(master)
         self.winfo_toplevel().title(f"Server: {client.communication_address}")
+        position_right = int(self.winfo_screenwidth() / 2)
+        position_down = int(self.winfo_screenheight() / 2)
+        master.geometry(f"+{position_right}+{position_down}")
+        self.grid(row=0, column=0)
+        self._master = master
+        self._client = client
+        try:
+            self._client.connect_to_server()
+        except Exception as e:
+            PopupWindow("Connection Error", f"Error when connecting to server: {e}")
+            LOGGER.error(f"Error when connecting to server: {e}")
+            master.destroy()
+            return
+
+        self._connect_to_user_button = tk.Button(
+            self, text="Connect to Users", command=self._connect_to_users
+        )
+        self._connect_to_user_button.grid(row=1, column=0)
+
+        self._register_entry = EntryWithLabel(self, "Nickname:", "MyName")
+        self._register_entry.grid(row=2, column=0)
+        self._register_button = tk.Button(self, text="Register", command=self._register)
+        self._register_button.grid(row=3, column=0)
+
+        self._label = tk.Label(self, text="User list:")
+        self._label.grid(row=0, column=1)
+        self._y_scroll = tk.Scrollbar(self, orient=tk.VERTICAL)
+        self._y_scroll.grid(row=1, column=2, sticky=tk.N + tk.S)
+
+        self._list = tk.StringVar()
+        self._list_box = tk.Listbox(
+            self, yscrollcommand=self._y_scroll.set, listvariable=self._list,
+        )
+        self._y_scroll["command"] = self._list_box.yview
+        self._list_box.grid(row=1, column=1)
+
+        self._list_updating_thread = Thread(target=self._list_update)
+        self._list_updating_thread.daemon = True
+        self._list_updating_thread.start()
+
+    def _register(self):
+        value = self._register_entry.value
+        if value.strip() == "":
+            PopupWindow("Invalid value", "Nickname cannot be empty")
+            return
+        try:
+            self._client.register(value.strip())
+        except Exception as e:
+            PopupWindow("Registration error", f"{e}")
+            LOGGER.error(f"Registration error: {e}")
+
+    def _list_update(self):
+        while True:
+            if not self.winfo_exists():
+                return
+            user_list = self._client.get_user_list()
+            selected = self._list_box.curselection()
+            self._list_box.delete(0, "end")
+            activated = None
+            for user in selected:
+                if user in user_list:
+                    activated = user_list.index(user)
+            self._list_box.insert(0, user_list)
+            if activated is not None:
+                self._list_box.activate(activated)
+            sleep(8)
+
+    def _connect_to_users(self):
+        selected_users = self._list_box.curselection()
+
+
+class ChatWindow(tk.Frame, Observer):
+    def __init__(self, master):
+        super().__init__(master)
+        position_right = int(self.winfo_screenwidth() / 2)
+        position_down = int(self.winfo_screenheight() / 2)
+        master.geometry(f"+{position_right}+{position_down}")
+        self.grid(row=0, column=0)
+        self._master = master
+
+        self._label = tk.Label(self, text="Chat Window")
+        self._label.grid(row=0, column=0)
+
+    def update(self, nickname: str, message: str) -> None:
+        pass
+
+
+class ChatWindowCreator(ObserverCreator):
+    def __init__(self, master):
+        self._master = master
+
+    def create(self) -> Observer:
+        new_window = tk.Toplevel(self._master)
+        return ChatWindow(new_window)
+
+
+class Mock:
+    def __init__(self, comm_address):
+        self.communication_address = comm_address
 
 
 class GuiClient(tk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self.winfo_toplevel().title("Client")
+        position_right = int(self.winfo_screenwidth() / 2)
+        position_down = int(self.winfo_screenheight() / 2)
+        master.geometry(f"+{position_right}+{position_down}")
+
         self._master = master
         self.grid(row=0, column=0)
 
@@ -61,5 +184,5 @@ class GuiClient(tk.Frame):
         server_address = self._address_entry.value
         port = self._port_entry.value
         new_window = tk.Toplevel(self._master)
-        client = Client((server_address, port), ObserverCreator())
+        client = Client((server_address, port), ChatWindowCreator(self))
         ServerConnection(new_window, client)

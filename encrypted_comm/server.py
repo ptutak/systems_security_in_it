@@ -228,9 +228,9 @@ class EncryptionMessageHandler(socketserver.BaseRequestHandler, ConnectionHandle
             self.server.user_storage.register(
                 client_nickname, client_request.connection
             )
-        except RegistrationError:
+        except RegistrationError as e:
             encrypted_message = client_request.connection.encrypt(
-                Request(Response.NICKNAME_ALREADY_USED, Message.zero_message())
+                Request(Response.REGISTRATION_ERROR, Message(str(e)))
             )
         else:
             encrypted_message = client_request.connection.encrypt(
