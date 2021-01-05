@@ -220,6 +220,7 @@ class ChatWindow(tk.Frame, Observer):
         try:
             self._client.disconnect_user(self._chat_with)
         except Exception as e:
+            PopupWindow("Error on disconnect", str(e))
             self._client.remove_user(self._chat_with)
 
 
