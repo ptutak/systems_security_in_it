@@ -222,10 +222,9 @@ class CommunicationHandler(socketserver.BaseRequestHandler, ConnectionHandler):
             response = Request(Response.USER_NOT_CONNECTED, Message.zero_message())
             self.request.sendall(self.encrypt(response))
             return
-
         response = Request(Response.DISCONNECTION_SUCCESS, Message.zero_message())
-        self.client_connections.deregister_connection(connection)
         self.request.sendall(self.encrypt(response))
+        self.client_connections.deregister_connection(connection)
 
     COMMANDS = {
         Command.CONNECT_TO_USER: _connect_to_user,
@@ -436,7 +435,6 @@ class Client(EncryptingConnectionHandler):
                 f"Disconnection failed {response.command_or_response} {response.message}"
             )
 
-        print("Disconnection success")
         self._communication_server.client_connections.deregister_connection(connection)
 
     def remove_user(self, nickname: str):

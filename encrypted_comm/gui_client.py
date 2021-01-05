@@ -153,10 +153,17 @@ class ChatWindow(tk.Frame, Observer):
         self.winfo_toplevel().title(f"Chat with: {nickname}")
         position_right = int(self.winfo_screenwidth() / 2)
         position_down = int(self.winfo_screenheight() / 2)
-        master.geometry(f"+{position_right}+{position_down}")
-        self.grid(row=0, column=0)
-        self._master = master
+        master.geometry(f"500x500+{position_right}+{position_down}")
+        master.rowconfigure(0, weight=1)
+        master.columnconfigure(0, weight=1)
         master.protocol("WM_DELETE_WINDOW", self._close_connection)
+        master.bind("<Return>", self._return_send_message)
+
+        self.grid(row=0, column=0, sticky=tk.N + tk.S + tk.W + tk.E)
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+
+        self._master = master
 
         self._label = tk.Label(self, text="Chat Window")
         self._label.grid(row=0, column=0)
@@ -169,7 +176,7 @@ class ChatWindow(tk.Frame, Observer):
             self, yscrollcommand=self._y_scroll.set, listvariable=self._chat,
         )
         self._y_scroll["command"] = self._chat_box.yview
-        self._chat_box.grid(row=1, column=0)
+        self._chat_box.grid(row=1, column=0, sticky=tk.N + tk.S + tk.W + tk.E)
 
         self._chat_entry_variable = tk.StringVar()
         self._chat_entry = tk.Entry(self, textvariable=self._chat_entry_variable)
@@ -179,11 +186,15 @@ class ChatWindow(tk.Frame, Observer):
         self._send_button.grid(row=2, column=1)
 
     def update(self, nickname: str, message: str) -> None:
-        now = datetime.datetime.now()
-        self._chat_box.insert(tk.END, f"# {nickname} {now}:", message)
+        now = datetime.datetime.now().isoformat(" ", timespec="milliseconds")
+        self._chat_box.insert(tk.END, f"# {nickname} {now}:", message, "")
+        self._chat_box.yview_scroll(3, tk.UNITS)
 
     def close(self) -> None:
         self._master.destroy()
+
+    def _return_send_message(self, event):
+        self._send_message()
 
     def _send_message(self) -> None:
         message = self._chat_entry_variable.get()
