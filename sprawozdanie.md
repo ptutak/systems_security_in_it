@@ -34,3 +34,21 @@ W momencie w którym klienci chcą się wymienić wiadomościami również wymie
 System umożliwia bezpieczną wymianę informacji pomiędzy klientami do momentu, w którym nie zostanie zastosowany atak Man-In-The-Middle. W momencie tego ataku, jeśli zostanie podstawiony "fałszywy serwer", tak zmodyfikowany by podmieniał właściwe klucze wysyłane do poszczególnych klientów, jest możliwe pełne odszyfrowanie wszystkich informacji wymienianych pomiędzy klientami.
 
 By pozbyć się tej wady należy zastosować pełną certyfikację SSL.
+
+## Uruchomienie
+
+By uruchomić serwer należy, będąc w głównym folderze wpisać komendę:
+
+```shell
+python3 ./start_server.py
+```
+
+Serwer uruchomi się i zacznie nasłuchiwać na domyślnym adresie, który można edytować w pliku `start_server.py`
+
+By uruchomić klienta należy z folderu głównego wpisać komendę:
+
+```shell
+python3 ./start_gui_client.py
+```
+
+Powinno pojawić się okno, gdzie możemy połączyć się z dowolnym serwerem, adresy domyślne to te domyślnie wpisane w pliku `start_server.py`.
